@@ -8,6 +8,7 @@
 // Author: 012311363
 //------------------------------------------------------------------------------
 //
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,7 +26,10 @@
 
 #define FALSE 0
 #define TRUE 1 
-#define ERROR -1
+#define OKAY 2
+#define ERROR 3
+#define END_OF_FILE 4
+#define NO_CHILDREN 5 
 
 #define BUFFER_SIZE 256 
 #define TYPE_DIRECTORY "DIR"
@@ -137,6 +141,7 @@ int main(int argc, char** argv)
     return RETURN_CODE_OUT_OF_MEMORY; 
   } 
 
+  printFilesystemTree(filesystem->root_node_, 1); 
 
 
   fclose(file_ptr); 
@@ -275,16 +280,23 @@ Node* allocateNewNode(void)
 /// @param current_node is the node with the strings which get freed now 
 void freeAllocatedStrings(Node** current_node)
 {
-  if(strcmp((*current_node)->type_, TYPE_FILE) == 0)
+  if((*current_node)->type_ != NULL)
   {
-    free((*current_node)->file_content_);
-    (*current_node)->file_content_ = NULL; 
+    if(strcmp((*current_node)->type_, TYPE_FILE) == 0)
+    {
+      free((*current_node)->file_content_);
+      (*current_node)->file_content_ = NULL; 
+    }
+
+    free((*current_node)->type_);
+    (*current_node)->type_= NULL;
   }
 
-  free((*current_node)->type_);
-  (*current_node)->type_= NULL;
-  free((*current_node)->name_);
-  (*current_node)->name_ = NULL; 
+  if((*current_node)->name_ != NULL)
+  {
+    free((*current_node)->name_);
+    (*current_node)->name_ = NULL; 
+  }
 }
 
 //------------------------------------------------------------------------------
@@ -388,28 +400,43 @@ Node* saveNewNodeFromFile(FILE* file_ptr)
 /// @return 0 or EOF if the file is at the end 
 int ignoreWhitespaces(FILE* file_ptr)
 {
-  char lost_character; 
+  int lost_character; 
 
-  while((lost_character = fgetc(file_ptr)) != OPENING_INDICATOR && lost_character != EOF)
+  while(1)
   {
-    if(lost_character == CLOSING_CONTENT_INDICATOR)
+    lost_character = fgetc(file_ptr); 
+    if(lost_character == WHITESPACE || lost_character == NEWLINE)
     {
-      return CLOSING_CONTENT_INDICATOR; 
-    }
-    else if(lost_character == OPENING_CONTENT_INDICATOR)
-    {
-      return 0; 
+      continue;
     }
 
-    continue;
+    return lost_character; 
+
+    switch (lost_character) 
+    {
+      case EOF:
+        return EOF; 
+        break;
+      case CLOSING_CONTENT_INDICATOR:
+        return CLOSING_CONTENT_INDICATOR; 
+        break; 
+      case CLOSING_INDICATOR:
+        break; 
+      case NEWLINE:
+        return NEWLINE; 
+        break; 
+      case OPENING_INDICATOR:
+        return OPENING_INDICATOR; 
+        break; 
+      case OPENING_CONTENT_INDICATOR:
+        return OKAY; 
+        break; 
+      default:
+        break; 
+    }
   }
 
-  if(lost_character == EOF)
-  {
-    return EOF; 
-  }
-
-  return 0; 
+  return lost_character; 
 }
 
 //------------------------------------------------------------------------------
@@ -610,7 +637,7 @@ Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node)
   Node* new_node = saveNewNodeFromFile(file_ptr); 
   if(new_node == NULL)
   {
-    return new_node; 
+    return NULL; 
   }
 
   new_node->parent_node_ = parent_node; 
@@ -620,27 +647,47 @@ Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node)
 
 int createContentOfTreeNode(FILE* file_ptr, Node* new_node)
 {
-  ignoreWhitespaces(file_ptr); 
+  int returned_separator = ignoreWhitespaces(file_ptr); 
 
   if(strcmp(new_node->type_, TYPE_FILE) == 0)
   {
     new_node->file_content_ = getValidNodeContentForFiles(file_ptr); 
-    return TRUE; 
+    return NO_CHILDREN; 
   }
   else if(strcmp(new_node->type_, TYPE_DIRECTORY) == 0)
   {
-    if(ignoreWhitespaces(file_ptr) == CLOSING_CONTENT_INDICATOR) 
+    if(returned_separator == OPENING_CONTENT_INDICATOR) 
     {
-      new_node->file_content_ = NULL; 
-      return TRUE; 
-    }
+      int object_return_code = 0; 
 
-    int return_code = parseObjectFromFile(file_ptr, new_node);
-    if(return_code == ERROR)
+      while(1)
+      {
+        returned_separator = ignoreWhitespaces(file_ptr); // less than or curved bracked closed or else 
+
+        if(returned_separator == CLOSING_CONTENT_INDICATOR)
+        {
+          break; 
+        }
+        else if(returned_separator == OPENING_INDICATOR)
+        {
+          object_return_code = parseObjectFromFile(file_ptr, new_node);
+
+          if(object_return_code == EOF)
+          {
+            return EOF; 
+          }
+          else if(object_return_code == ERROR)
+          {
+            return ERROR; 
+          }
+        }
+      }
+      return OKAY; 
+    }
+    else 
     {
       return ERROR; 
     }
-    return TRUE; 
   }
   return ERROR; 
 }
@@ -673,49 +720,68 @@ void linkNewNode(Node* new_node, Node* parent_node)
 
 int parseObjectFromFile(FILE* file_ptr, Node* parent_node) 
 {
-  if(ignoreWhitespaces(file_ptr) == EOF) 
-  {
-    return TRUE; 
-  }
-
   Node* new_node = createBasisOfTreeNode(file_ptr, parent_node); 
   if(new_node == NULL)
   {
     return ERROR; 
   }
   
-  if(createContentOfTreeNode(file_ptr, new_node) == ERROR)
+  int content_return_code = createContentOfTreeNode(file_ptr, new_node); 
+
+  if(content_return_code == ERROR)
   {
     return ERROR; 
   }
+  else if(content_return_code == EOF)
+  {
+    return END_OF_FILE; 
+  }
 
-  return 0; 
+  return OKAY; 
 }
 
 Node* parseFile(FILE* file_ptr, Filesystem* filesystem)
 {
-  int end_of_file_code = FALSE; 
   filesystem->root_node_ = saveRootNode(filesystem);
   if(filesystem->root_node_ == NULL)
   {
     return NULL; 
   }
 
-  while(end_of_file_code != TRUE)
+  while(1)
   {
-    int return_code = parseObjectFromFile(file_ptr, filesystem->root_node_); 
-    if(return_code == ERROR)
+    int return_code = 0; 
+    int returned_separator = ignoreWhitespaces(file_ptr); // more than or else 
+
+    if(returned_separator == OPENING_INDICATOR)
     {
-      printFilesystemTree(filesystem->root_node_, 1); 
-      freeAllocatedNode(filesystem->root_node_);
-      return NULL; 
+      return_code = parseObjectFromFile(file_ptr, filesystem->root_node_); 
+
+      if(return_code == ERROR)
+      {
+        printFilesystemTree(filesystem->root_node_, 1); 
+        freeAllocatedNode(filesystem->root_node_);
+        return NULL; 
+      }
+      else if(return_code == END_OF_FILE)
+      {
+        return filesystem->root_node_; 
+      }
+      else if(return_code == OKAY)
+      {
+        continue;
+      }
     }
-
-    end_of_file_code = return_code; 
+    
+    if(returned_separator == EOF)
+    {
+      return filesystem->root_node_; 
+    }
   }
-
   return filesystem->root_node_; 
 }
+
+
 
 void printFilesystemTree(Node* current_node, int tree_depth)
 {
@@ -733,6 +799,9 @@ void printFilesystemTree(Node* current_node, int tree_depth)
     printf("|-- %s\n", current_node->type_);
     printf("|-- %d\n", current_node->permission_);
     printf("|-- %s\n", current_node->file_content_);
+    printf("|-- %p\n", current_node->directory_child_node_); 
+    printf("|-- %p\n", current_node->next_sibling_node_);
+    printf("|-- %p\n", current_node->parent_node_);
 
   printFilesystemTree(current_node->directory_child_node_, tree_depth + 1); 
   printFilesystemTree(current_node->next_sibling_node_, tree_depth); 
