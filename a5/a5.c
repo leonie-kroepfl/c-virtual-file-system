@@ -11,20 +11,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
+// #include <ctype.h>
 #include <assert.h>
 
 #define RETURN_CODE_INVALID_ARGC 255 
 #define ERROR_MESSAGE_INVALID_ARGC_BELOW_2 "[ERROR] No config file provided, exiting...\n"
 #define ERROR_MESSAGE_INVALID_ARGC_ABOVE_2 "[ERROR] Too many arguments, exiting...\n"
 #define RETURN_CODE_INVALID_FILE 254
-#define ERROR_MESSAGE_IVALID_FILE "[ERROR] File could not be opened, exiting...\n" 
-#define ERROR_MESSAGE_IVALID_MAGIC_NUMBER "[ERROR] Invalid config file, exiting...\n" 
+#define ERROR_MESSAGE_INVALID_FILE "[ERROR] File could not be opened, exiting...\n" 
+#define ERROR_MESSAGE_INVALID_MAGIC_NUMBER "[ERROR] Invalid config file, exiting...\n" 
 #define RETURN_CODE_OUT_OF_MEMORY 123
 #define ERROR_MESSAGE_OUT_OF_MEMORY "[ERROR] Not able to allocate space, exiting...\n" 
 
-#define FALSE 1
-#define TRUE 0 
+#define FALSE 0
+#define TRUE 1 
+#define ERROR -1
 
 #define BUFFER_SIZE 256 
 #define TYPE_DIRECTORY "DIR"
@@ -32,6 +33,9 @@
 #define OPENING_INDICATOR '<'
 #define CLOSING_INDICATOR '>'
 #define WHITESPACE ' '
+#define NEWLINE '\n'
+#define OPENING_CONTENT_INDICATOR '{'
+#define CLOSING_CONTENT_INDICATOR '}'
 
 typedef enum _Permission_
 {
@@ -39,6 +43,7 @@ typedef enum _Permission_
   WRITE,
   READ,
   READ_AND_WRITE,
+  INVALID_PERMISSION,
 } Permission;
 
 typedef char* Pointer;
@@ -52,6 +57,7 @@ typedef struct _Node_
   Node* parent_node_; 
   Node* next_sibling_node_; 
   Node* directory_child_node_; 
+  int directory_child_count_; 
   Pointer file_content_; 
 } Node; 
 
@@ -64,20 +70,29 @@ typedef struct _Filesystem_
 int checkArgumentCount(int argc); 
 FILE* openFileToRead(char *file_name);
 int checkForMagicNumber(FILE* file_ptr); 
-Node* allocateNewNode(); 
-Node* saveNewNode(); 
+Node* allocateNewNode(void); 
+Node* saveNewNode(void); 
 Pointer allocateNewString(int length_of_string); 
+Pointer reallocateNewString(int length_of_new_string, char* old_string); 
 Pointer saveNewString(char node_detail[]);
-int saveRootNode(Filesystem* filesystem);
+Node* saveRootNode(Filesystem* filesystem);
 Node* saveNewNodeFromFile(FILE* file_ptr); 
-void ignoreWhitespaces(FILE* file_ptr); 
+int ignoreWhitespaces(FILE* file_ptr); 
 Pointer getValidNodeType(FILE* file_ptr); 
-int checkValidationOfType(char* node_type); 
+int checkValidationOfType(char node_type[]); 
 Pointer getValidNodeName(FILE* file_ptr); 
 int checkValidationOfName(char tmp_character); 
 Permission getValidNodePermission(FILE* file_ptr); 
 int checkValidationOfPermission(Permission node_permission); 
-Pointer getValidNodeContent(FILE* file_ptr); 
+Pointer getValidNodeContentForFiles(FILE* file_ptr); 
+void freeAllocatedStrings(Node** current_node);
+void freeAllocatedNode(Node* current_node);
+Node* parseFile(FILE* file_ptr, Filesystem* filesystem);
+int parseObjectFromFile(FILE* file_ptr, Node* parent_node); 
+Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node); 
+int createContentOfTreeNode(FILE* file_ptr, Node* new_node); 
+void linkNewNode(Node* new_node, Node* parent_node); 
+void printFilesystemTree(Node* current_node, int tree_depth); 
 
 
 //------------------------------------------------------------------------------
@@ -107,46 +122,27 @@ int main(int argc, char** argv)
   Filesystem *filesystem = calloc(1, sizeof(Filesystem)); 
   if(filesystem == NULL)
   {
+    printf("%s", ERROR_MESSAGE_OUT_OF_MEMORY); 
     fclose(file_ptr);
     return RETURN_CODE_OUT_OF_MEMORY; 
   }
 
-  filesystem->root_node_ = allocateNewNode();
+  filesystem->root_node_ = parseFile(file_ptr, filesystem); 
   if(filesystem->root_node_ == NULL)
   {
-    fclose(file_ptr);
-    return RETURN_CODE_OUT_OF_MEMORY; 
-  }
-
-  if(saveRootNode(filesystem) != TRUE)
-  {
     printf("%s", ERROR_MESSAGE_OUT_OF_MEMORY); 
     fclose(file_ptr);
-    free(filesystem->root_node_);
     free(filesystem);
     filesystem = NULL; 
     return RETURN_CODE_OUT_OF_MEMORY; 
-  }
-
-  filesystem->root_node_->directory_child_node_ = saveNewNodeFromFile(file_ptr); 
-  if(filesystem->root_node_->directory_child_node_ == NULL)
-  {
-    printf("%s", ERROR_MESSAGE_OUT_OF_MEMORY); 
-    fclose(file_ptr);
-    free(filesystem->root_node_->directory_child_node_);
-    free(filesystem->root_node_);
-    free(filesystem);
-    filesystem = NULL; 
-    return RETURN_CODE_OUT_OF_MEMORY; 
-  }
+  } 
 
 
 
   fclose(file_ptr); 
-    free(filesystem->root_node_->directory_child_node_);
-    free(filesystem->root_node_);
-    free(filesystem);
-    filesystem = NULL; 
+  freeAllocatedNode(filesystem->root_node_);
+  free(filesystem);
+  filesystem = NULL; 
   return 0; 
 }
 
@@ -179,7 +175,7 @@ FILE* openFileToRead(char *file_name)
 
   if(file_ptr == NULL)
   {
-    printf("%s", ERROR_MESSAGE_IVALID_FILE); 
+    printf("%s", ERROR_MESSAGE_INVALID_FILE); 
     return NULL; 
   }
   return file_ptr; 
@@ -202,7 +198,7 @@ int checkForMagicNumber(FILE* file_ptr)
     return TRUE; 
   }
 
-  printf("%s", ERROR_MESSAGE_IVALID_MAGIC_NUMBER);
+  printf("%s", ERROR_MESSAGE_INVALID_MAGIC_NUMBER);
   return RETURN_CODE_INVALID_FILE; 
 } 
 
@@ -212,7 +208,25 @@ int checkForMagicNumber(FILE* file_ptr)
 /// @return the string pointer or NULL if there is an error 
 Pointer allocateNewString(int length_of_string)
 {
-  Pointer tmp_ptr = calloc(length_of_string, sizeof(char) + 1); 
+  Pointer tmp_ptr = calloc(length_of_string + 1, sizeof(char)); 
+
+  if(tmp_ptr == NULL)
+  {
+    printf("%s", ERROR_MESSAGE_OUT_OF_MEMORY);
+    return NULL;
+  } 
+
+  return tmp_ptr; 
+} 
+
+//------------------------------------------------------------------------------
+/// @brief This function reallocates memory for a new string andcopys the old one in it. 
+/// @param length_of_new_string is the given length of the new string
+/// @param old_string is the given old string which should be rallocated 
+/// @return the string pointer or NULL if there is an error 
+Pointer reallocateNewString(int length_of_new_string, char* old_string)
+{
+  Pointer tmp_ptr = realloc(old_string, (length_of_new_string + 1) * sizeof(char)); 
 
   if(tmp_ptr == NULL)
   {
@@ -236,7 +250,6 @@ Pointer saveNewString(char node_detail[])
     return NULL; 
   }
 
-  node_detail[length_of_string] = '\0'; 
   strcpy(tmp_ptr, node_detail); 
   return tmp_ptr; 
 }
@@ -244,7 +257,7 @@ Pointer saveNewString(char node_detail[])
 //------------------------------------------------------------------------------
 /// @brief This function allocates memory for a tree node. 
 /// @return the node pointer or NULL if there is an error 
-Node* allocateNewNode()
+Node* allocateNewNode(void)
 {
   Node* tmp_ptr = calloc(1, sizeof(Node));
 
@@ -258,77 +271,145 @@ Node* allocateNewNode()
 }
 
 //------------------------------------------------------------------------------
+/// @brief This function frees all the strings allocated earlier. 
+/// @param current_node is the node with the strings which get freed now 
+void freeAllocatedStrings(Node** current_node)
+{
+  if(strcmp((*current_node)->type_, TYPE_FILE) == 0)
+  {
+    free((*current_node)->file_content_);
+    (*current_node)->file_content_ = NULL; 
+  }
+
+  free((*current_node)->type_);
+  (*current_node)->type_= NULL;
+  free((*current_node)->name_);
+  (*current_node)->name_ = NULL; 
+}
+
+//------------------------------------------------------------------------------
+/// @brief This function frees all the nodes allocated earlier. 
+/// @param current_node is the node which gets freed now 
+void freeAllocatedNode(Node* current_node)
+{
+  if(current_node == NULL)
+  {
+    return; 
+  }
+
+  freeAllocatedStrings(&current_node); 
+  freeAllocatedNode(current_node->directory_child_node_); 
+  freeAllocatedNode(current_node->next_sibling_node_); 
+  free(current_node); 
+  current_node = NULL; 
+}
+
+//------------------------------------------------------------------------------
 /// @brief This function saves the new allocated root node with details. 
 /// @param filesystem is pointer to the filesystem 
 /// @return 0 or the individual exit errorcode 
-int saveRootNode(Filesystem* filesystem)
+Node* saveRootNode(Filesystem* filesystem)
 {
-  filesystem->root_node_->type_ = saveNewString("root");
-  if(filesystem->root_node_->type_ == NULL)
+  filesystem->root_node_ = allocateNewNode();
+  if(filesystem->root_node_ == NULL)
   {
-    return RETURN_CODE_OUT_OF_MEMORY; 
+    return NULL; 
   }
 
-  filesystem->root_node_->name_ = saveNewString("root");
+  filesystem->root_node_->type_ = saveNewString("root\0");
+  if(filesystem->root_node_->type_ == NULL)
+  {
+    free(filesystem->root_node_); 
+    return NULL; 
+  }
+
+  filesystem->root_node_->name_ = saveNewString("root\0");
   if(filesystem->root_node_->name_ == NULL)
   {
-    return RETURN_CODE_OUT_OF_MEMORY; 
+    free(filesystem->root_node_->type_); 
+    free(filesystem->root_node_); 
+    return NULL; 
   }
 
   filesystem->root_node_->permission_ = NONE; 
   filesystem->root_node_->parent_node_ = NULL; 
-  filesystem->root_node_->file_content_ = NULL; 
   filesystem->root_node_->next_sibling_node_ = NULL; 
   filesystem->root_node_->directory_child_node_ = NULL; 
-  return TRUE; 
+  return filesystem->root_node_; 
 }
 
 //------------------------------------------------------------------------------
 /// @brief This function saves a new valid node from the file. 
 /// @param file_ptr is the pointer to the open file 
+
 /// @return the node pointer or NULL if here is an error 
 Node* saveNewNodeFromFile(FILE* file_ptr)
 {
-  Node* tmp_node; 
-  ignoreWhitespaces(file_ptr); 
-  tmp_node->type_ = getValidNodeType(file_ptr); 
-  if(tmp_node->type_ == NULL)
+  Node* new_node = allocateNewNode(); 
+  if(new_node == NULL)
   {
     return NULL; 
   }
 
-  tmp_node->name_ = getValidNodeName(file_ptr); 
-  if(tmp_node->name_ == NULL)
+  new_node->type_ = getValidNodeType(file_ptr); 
+  if(new_node->type_ == NULL)
   {
+    free(new_node); 
     return NULL; 
   }
 
-  tmp_node->permission_ = getValidNodePermission(file_ptr);
-  if(tmp_node->permission_ == -1)
+  new_node->name_ = getValidNodeName(file_ptr); 
+  if(new_node->name_ == NULL)
   {
+    free(new_node->type_); 
+    free(new_node);
     return NULL; 
   }
 
-  tmp_node->file_content_ = getValidNodeContent(file_ptr); 
-  if(tmp_node->file_content_ == NULL)
+  new_node->permission_ = getValidNodePermission(file_ptr);
+  if(new_node->permission_ == INVALID_PERMISSION)
   {
+    free(new_node->type_); 
+    free(new_node->name_); 
+    free(new_node);
     return NULL; 
   }
 
-  return tmp_node; 
+  new_node->parent_node_ = NULL; 
+  new_node->directory_child_count_ = 0; 
+  new_node->next_sibling_node_ = NULL;
+  new_node->directory_child_node_ = NULL;
+  return new_node; 
 } 
 
 //------------------------------------------------------------------------------
 /// @brief This function ignores the whitespaces in the file before the formated information. 
 /// @param file_ptr is the pointer to the open file 
-void ignoreWhitespaces(FILE* file_ptr)
+/// @return 0 or EOF if the file is at the end 
+int ignoreWhitespaces(FILE* file_ptr)
 {
   char lost_character; 
 
-  while((lost_character = fgetc(file_ptr)) != OPENING_INDICATOR)
+  while((lost_character = fgetc(file_ptr)) != OPENING_INDICATOR && lost_character != EOF)
   {
+    if(lost_character == CLOSING_CONTENT_INDICATOR)
+    {
+      return CLOSING_CONTENT_INDICATOR; 
+    }
+    else if(lost_character == OPENING_CONTENT_INDICATOR)
+    {
+      return 0; 
+    }
+
     continue;
   }
+
+  if(lost_character == EOF)
+  {
+    return EOF; 
+  }
+
+  return 0; 
 }
 
 //------------------------------------------------------------------------------
@@ -338,9 +419,9 @@ void ignoreWhitespaces(FILE* file_ptr)
 Pointer getValidNodeType(FILE* file_ptr)
 {
   char tmp_character; 
-  char *node_type; 
+  char node_type[BUFFER_SIZE]; 
   int length_of_string = 0; 
-  char single_whitespace = fgetc(file_ptr); 
+  tmp_character = fgetc(file_ptr); // whitespace 
 
   while((tmp_character = fgetc(file_ptr)) != ',') 
   {
@@ -362,7 +443,7 @@ Pointer getValidNodeType(FILE* file_ptr)
 /// @brief This function checks the infromaton from the file for validation. 
 /// @param node_type is the information from the file 
 /// @return TRUE or FALSE if the string is valid or not 
-int checkValidationOfType(char* node_type)
+int checkValidationOfType(char node_type[])
 {
   if(strcmp(node_type, "DIR") == 0)
   {
@@ -383,10 +464,10 @@ int checkValidationOfType(char* node_type)
 Pointer getValidNodeName(FILE* file_ptr)
 {
   char tmp_character; 
-  char *node_name; 
+  char node_name[BUFFER_SIZE]; 
   int length_of_string = 0; 
-  char single_whitespace = fgetc(file_ptr); 
-  char lost_character = fgetc(file_ptr); 
+  tmp_character = fgetc(file_ptr); // whitespace 
+  tmp_character = fgetc(file_ptr); // quotation mark 
 
   while((tmp_character = fgetc(file_ptr)) != '"') 
   {
@@ -399,7 +480,8 @@ Pointer getValidNodeName(FILE* file_ptr)
     length_of_string++; 
   }
   
-  lost_character = fgetc(file_ptr); 
+  tmp_character = fgetc(file_ptr); // comma 
+  node_name[length_of_string] = '\0'; 
   return saveNewString(node_name); 
 }
 
@@ -437,15 +519,20 @@ int checkValidationOfName(char tmp_character)
 /// @brief This function gets the valid node permission from the file. 
 /// @param file_ptr is the pointer to the open file 
 /// @return the permission status or NONE if there is an error 
-Permission getNodePermission(FILE* file_ptr)
+Permission getValidNodePermission(FILE* file_ptr)
 {
-  char single_whitespace = fgetc(file_ptr); 
-  Permission node_permssion = fgetc(file_ptr);   
-  char lost_character = fgetc(file_ptr); 
+  char node_permssion = fgetc(file_ptr); // whitespace 
+  node_permssion = fgetc(file_ptr); 
+  node_permssion -= '0';
+  char lost_character = fgetc(file_ptr); // comma 
+  if(lost_character == WHITESPACE)
+  {
+    return INVALID_PERMISSION; 
+  }
 
   if(checkValidationOfPermission(node_permssion) == FALSE)
   {
-    return NONE; 
+    return INVALID_PERMISSION; 
   }
 
   return node_permssion; 
@@ -469,26 +556,185 @@ int checkValidationOfPermission(Permission node_permission)
 /// @brief This function gets the valid node content from the file. 
 /// @param file_ptr is the pointer to the open file 
 /// @return the string pointer or NULL if here is an error 
-Pointer getValidNodeContent(FILE* file_ptr)
+Pointer getValidNodeContentForFiles(FILE* file_ptr)
 {
-  char tmp_character; 
-  char *node_content; 
   int length_of_string = 0; 
-  char single_whitespace = fgetc(file_ptr); 
-  char lost_character = fgetc(file_ptr); 
-
-  while((tmp_character = fgetc(file_ptr)) != '}' && (int)tmp_character != 0) 
+  char tmp_character; 
+  int buffer_size = BUFFER_SIZE; 
+  char *node_content = allocateNewString(buffer_size); 
+  if(node_content == NULL)
   {
+    printf("%s", ERROR_MESSAGE_OUT_OF_MEMORY); 
+    return NULL;
+  }
+
+  while((tmp_character = fgetc(file_ptr)) != CLOSING_CONTENT_INDICATOR && (int)tmp_character != EOF) 
+  {
+    if(buffer_size < length_of_string)
+    {
+      buffer_size += BUFFER_SIZE; 
+      char* tmp_new_ptr = reallocateNewString(buffer_size, node_content);
+      if(tmp_new_ptr == NULL)
+      {
+        printf("%s", ERROR_MESSAGE_OUT_OF_MEMORY); 
+        return NULL;
+      }
+      node_content = tmp_new_ptr; 
+    }
+
     node_content[length_of_string] = tmp_character; 
     length_of_string++; 
   }
   
-  single_whitespace = fgetc(file_ptr); 
-  lost_character = fgetc(file_ptr); 
-  return saveNewString(node_content); 
+  node_content[length_of_string] = '\0'; 
+  char* tmp_new_ptr = reallocateNewString(length_of_string, node_content);
+
+  if(length_of_string == 0)
+  {
+    return NULL; 
+  }
+  else if(tmp_new_ptr == NULL)
+  {
+    printf("%s", ERROR_MESSAGE_OUT_OF_MEMORY); 
+    return NULL;
+  }
+
+  return tmp_new_ptr; 
 }
 
 
 
 
+Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node)
+{
+  Node* new_node = saveNewNodeFromFile(file_ptr); 
+  if(new_node == NULL)
+  {
+    return new_node; 
+  }
+
+  new_node->parent_node_ = parent_node; 
+  linkNewNode(new_node, parent_node); 
+  return new_node; 
+}
+
+int createContentOfTreeNode(FILE* file_ptr, Node* new_node)
+{
+  ignoreWhitespaces(file_ptr); 
+
+  if(strcmp(new_node->type_, TYPE_FILE) == 0)
+  {
+    new_node->file_content_ = getValidNodeContentForFiles(file_ptr); 
+    return TRUE; 
+  }
+  else if(strcmp(new_node->type_, TYPE_DIRECTORY) == 0)
+  {
+    if(ignoreWhitespaces(file_ptr) == CLOSING_CONTENT_INDICATOR) 
+    {
+      new_node->file_content_ = NULL; 
+      return TRUE; 
+    }
+
+    int return_code = parseObjectFromFile(file_ptr, new_node);
+    if(return_code == ERROR)
+    {
+      return ERROR; 
+    }
+    return TRUE; 
+  }
+  return ERROR; 
+}
+
+
+void linkNewNode(Node* new_node, Node* parent_node)
+{
+  if(parent_node->directory_child_count_ == 0)
+  {
+    parent_node->directory_child_node_ = new_node; 
+    parent_node->directory_child_count_++; 
+    return; 
+  }
+
+  Node* current_node = parent_node->directory_child_node_; 
+
+  while(current_node->next_sibling_node_ != NULL)
+  {
+    current_node = current_node->next_sibling_node_; 
+  }
+
+  if(current_node->next_sibling_node_ == NULL)
+  {
+    current_node->next_sibling_node_ = new_node; 
+    parent_node->directory_child_count_++; 
+  }
+
+  return; 
+}
+
+int parseObjectFromFile(FILE* file_ptr, Node* parent_node) 
+{
+  if(ignoreWhitespaces(file_ptr) == EOF) 
+  {
+    return TRUE; 
+  }
+
+  Node* new_node = createBasisOfTreeNode(file_ptr, parent_node); 
+  if(new_node == NULL)
+  {
+    return ERROR; 
+  }
+  
+  if(createContentOfTreeNode(file_ptr, new_node) == ERROR)
+  {
+    return ERROR; 
+  }
+
+  return 0; 
+}
+
+Node* parseFile(FILE* file_ptr, Filesystem* filesystem)
+{
+  int end_of_file_code = FALSE; 
+  filesystem->root_node_ = saveRootNode(filesystem);
+  if(filesystem->root_node_ == NULL)
+  {
+    return NULL; 
+  }
+
+  while(end_of_file_code != TRUE)
+  {
+    int return_code = parseObjectFromFile(file_ptr, filesystem->root_node_); 
+    if(return_code == ERROR)
+    {
+      printFilesystemTree(filesystem->root_node_, 1); 
+      freeAllocatedNode(filesystem->root_node_);
+      return NULL; 
+    }
+
+    end_of_file_code = return_code; 
+  }
+
+  return filesystem->root_node_; 
+}
+
+void printFilesystemTree(Node* current_node, int tree_depth)
+{
+  if(current_node == NULL)
+  {
+    return; 
+  }
+
+  for(int depth_index = 0; depth_index < tree_depth; depth_index++)
+  {
+    printf("\t"); 
+  }
+
+  printf("|-- %s\n", current_node->name_);
+    printf("|-- %s\n", current_node->type_);
+    printf("|-- %d\n", current_node->permission_);
+    printf("|-- %s\n", current_node->file_content_);
+
+  printFilesystemTree(current_node->directory_child_node_, tree_depth + 1); 
+  printFilesystemTree(current_node->next_sibling_node_, tree_depth); 
+}
 
