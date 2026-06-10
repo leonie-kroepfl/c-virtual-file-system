@@ -198,6 +198,14 @@ int checkForMagicNumber(FILE* file_ptr)
     return RETURN_CODE_INVALID_FILE; 
   }
 
+printf("[%s]\n", first_line);
+
+for(size_t i = 0; i < strlen(first_line); i++)
+{
+    printf("%d ", (unsigned char)first_line[i]);
+}
+printf("\n");
+
   if(strcmp(first_line, "# ISP 2026 A5 valid config #\n") == 0)
   {
     return TRUE; 
@@ -411,32 +419,7 @@ int ignoreWhitespaces(FILE* file_ptr)
     }
 
     return lost_character; 
-
-    switch (lost_character) 
-    {
-      case EOF:
-        return EOF; 
-        break;
-      case CLOSING_CONTENT_INDICATOR:
-        return CLOSING_CONTENT_INDICATOR; 
-        break; 
-      case CLOSING_INDICATOR:
-        break; 
-      case NEWLINE:
-        return NEWLINE; 
-        break; 
-      case OPENING_INDICATOR:
-        return OPENING_INDICATOR; 
-        break; 
-      case OPENING_CONTENT_INDICATOR:
-        return OKAY; 
-        break; 
-      default:
-        break; 
-    }
   }
-
-  return lost_character; 
 }
 
 //------------------------------------------------------------------------------
@@ -634,6 +617,7 @@ Pointer getValidNodeContentForFiles(FILE* file_ptr)
 
 Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node)
 {
+  printf("F\n");
   Node* new_node = saveNewNodeFromFile(file_ptr); 
   if(new_node == NULL)
   {
@@ -648,6 +632,7 @@ Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node)
 int createContentOfTreeNode(FILE* file_ptr, Node* new_node)
 {
   int returned_separator = ignoreWhitespaces(file_ptr); 
+printf("AFTER PERMISSION TOKEN = '%c'\n", returned_separator);
 
   if(strcmp(new_node->type_, TYPE_FILE) == 0)
   {
@@ -656,13 +641,20 @@ int createContentOfTreeNode(FILE* file_ptr, Node* new_node)
   }
   else if(strcmp(new_node->type_, TYPE_DIRECTORY) == 0)
   {
+    printf("returned_separator = %d\n", returned_separator);
+printf("OPENING_CONTENT_INDICATOR = %d\n", OPENING_CONTENT_INDICATOR);
     if(returned_separator == OPENING_CONTENT_INDICATOR) 
     {
       int object_return_code = 0; 
 
       while(1)
       {
+        printf("DIR LOOP START\n");
+
         returned_separator = ignoreWhitespaces(file_ptr); // less than or curved bracked closed or else 
+
+printf("TOKEN = '%c' (%d)\n", returned_separator, returned_separator);
+
 
         if(returned_separator == CLOSING_CONTENT_INDICATOR)
         {
@@ -670,6 +662,7 @@ int createContentOfTreeNode(FILE* file_ptr, Node* new_node)
         }
         else if(returned_separator == OPENING_INDICATOR)
         {
+          printf("PARSING CHILD\n"); 
           object_return_code = parseObjectFromFile(file_ptr, new_node);
 
           if(object_return_code == EOF)
@@ -720,6 +713,7 @@ void linkNewNode(Node* new_node, Node* parent_node)
 
 int parseObjectFromFile(FILE* file_ptr, Node* parent_node) 
 {
+  printf("D\n");
   Node* new_node = createBasisOfTreeNode(file_ptr, parent_node); 
   if(new_node == NULL)
   {
@@ -742,6 +736,7 @@ int parseObjectFromFile(FILE* file_ptr, Node* parent_node)
 
 Node* parseFile(FILE* file_ptr, Filesystem* filesystem)
 {
+  printf("A\n");
   filesystem->root_node_ = saveRootNode(filesystem);
   if(filesystem->root_node_ == NULL)
   {
@@ -750,8 +745,9 @@ Node* parseFile(FILE* file_ptr, Filesystem* filesystem)
 
   while(1)
   {
-    int return_code = 0; 
+    int return_code = 0; printf("B\n");
     int returned_separator = ignoreWhitespaces(file_ptr); // more than or else 
+printf("C %d\n", returned_separator);
 
     if(returned_separator == OPENING_INDICATOR)
     {
