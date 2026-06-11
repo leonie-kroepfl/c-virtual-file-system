@@ -24,14 +24,24 @@
 #define RETURN_CODE_OUT_OF_MEMORY 123
 #define ERROR_MESSAGE_OUT_OF_MEMORY "[ERROR] Not able to allocate space, exiting...\n" 
 
+#define ERROR_MESSAGE_COMMAND_PARAMETER "[ERROR] Parameters not correct\n"
+#define ERROR_MESSAGE_COMMAND_PATH "[ERROR] Invalid path\n"
+#define ERROR_MESSAGE_COMMAND_UNKNOWN "[ERROR] Command not found\n"
+#define ERROR_MESSAGE_PERMISSION_READ "[ERROR] No reading permissions for: "
+#define ERROR_MESSAGE_PERMISSION_WRITE "[ERROR] No writing permission for: "
+
+
+
 #define FALSE 0
 #define TRUE 1 
 #define OKAY 2
 #define ERROR 3
 #define END_OF_FILE 4
 #define NO_CHILDREN 5 
+#define EXIT 6
 
 #define BUFFER_SIZE 256 
+#define MAX_TOKENS 3
 #define TYPE_DIRECTORY "DIR"
 #define TYPE_FILE "FILE"
 #define OPENING_INDICATOR '<'
@@ -40,6 +50,21 @@
 #define NEWLINE '\n'
 #define OPENING_CONTENT_INDICATOR '{'
 #define CLOSING_CONTENT_INDICATOR '}'
+#define SHELL_OPENING " > "
+#define PATH_SEPARATOR '/'
+
+#define COMMAND_CWD "cwd"
+#define COMMAND_LS "ls"
+#define COMMAND_CD "cd"
+#define COMMAND_INFO "info"
+#define COMMAND_CAT "cat"
+#define COMMAND_TREE "tree"
+#define COMMAND_TOUCH "touch"
+#define COMMAND_MKDIR "mkdir"
+#define COMMAND_RM "rm"
+#define VALID_EXIT_CODE_1 "EXIT\n"
+#define VALID_EXIT_CODE_2 "ExIt\n"
+#define VALID_EXIT_CODE_3 "exit\n"
 
 typedef enum _Permission_
 {
@@ -81,7 +106,7 @@ Pointer reallocateNewString(int length_of_new_string, char* old_string);
 Pointer saveNewString(char node_detail[]);
 Node* saveRootNode(Filesystem* filesystem);
 Node* saveNewNodeFromFile(FILE* file_ptr); 
-int ignoreWhitespaces(FILE* file_ptr); 
+int ignoreWhitespacesInFile(FILE* file_ptr); 
 Pointer getValidNodeType(FILE* file_ptr); 
 int checkValidationOfType(char node_type[]); 
 Pointer getValidNodeName(FILE* file_ptr); 
@@ -97,6 +122,12 @@ Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node);
 int createContentOfTreeNode(FILE* file_ptr, Node* new_node); 
 void linkNewNode(Node* new_node, Node* parent_node); 
 void printFilesystemTree(Node* current_node, int tree_depth); 
+void printShell(Filesystem* filesystem, Node* current_directory); 
+int handleInput(Filesystem* filesystem); 
+int checkInputForExitCode(char tmp_input[]); 
+void ignoreWhitespacesInInput(char tmp_input[]); 
+void executeCommandArgument(Filesystem* filesystem, char* input[]); 
+void printPath(Filesystem* filesystem, Node* current_directory); 
 
 
 //------------------------------------------------------------------------------
@@ -141,8 +172,16 @@ int main(int argc, char** argv)
     return RETURN_CODE_OUT_OF_MEMORY; 
   } 
 
-  printFilesystemTree(filesystem->root_node_, 1); 
-
+  filesystem->current_working_directory_ = filesystem->root_node_; 
+  // printFilesystemTree(filesystem->root_node_, 1); 
+  while(1)
+  {
+    printShell(filesystem, filesystem->current_working_directory_); 
+    if(handleInput(filesystem) == EXIT)
+    {
+      break;
+    }
+  }
 
   fclose(file_ptr); 
   freeAllocatedNode(filesystem->root_node_);
@@ -197,14 +236,6 @@ int checkForMagicNumber(FILE* file_ptr)
   {
     return RETURN_CODE_INVALID_FILE; 
   }
-
-printf("[%s]\n", first_line);
-
-for(size_t i = 0; i < strlen(first_line); i++)
-{
-    printf("%d ", (unsigned char)first_line[i]);
-}
-printf("\n");
 
   if(strcmp(first_line, "# ISP 2026 A5 valid config #\n") == 0)
   {
@@ -336,14 +367,14 @@ Node* saveRootNode(Filesystem* filesystem)
     return NULL; 
   }
 
-  filesystem->root_node_->type_ = saveNewString("root\0");
+  filesystem->root_node_->type_ = saveNewString("DIR\0");
   if(filesystem->root_node_->type_ == NULL)
   {
     free(filesystem->root_node_); 
     return NULL; 
   }
 
-  filesystem->root_node_->name_ = saveNewString("root\0");
+  filesystem->root_node_->name_ = saveNewString("user@/isp\0");
   if(filesystem->root_node_->name_ == NULL)
   {
     free(filesystem->root_node_->type_); 
@@ -406,7 +437,7 @@ Node* saveNewNodeFromFile(FILE* file_ptr)
 /// @brief This function ignores the whitespaces in the file before the formated information. 
 /// @param file_ptr is the pointer to the open file 
 /// @return 0 or EOF if the file is at the end 
-int ignoreWhitespaces(FILE* file_ptr)
+int ignoreWhitespacesInFile(FILE* file_ptr)
 {
   int lost_character; 
 
@@ -521,6 +552,10 @@ int checkValidationOfName(char tmp_character)
   {
     return TRUE;
   }
+  else if(tmp_character == '.')
+  {
+    return TRUE; 
+  }
 
   return FALSE; 
 } 
@@ -617,7 +652,6 @@ Pointer getValidNodeContentForFiles(FILE* file_ptr)
 
 Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node)
 {
-  printf("F\n");
   Node* new_node = saveNewNodeFromFile(file_ptr); 
   if(new_node == NULL)
   {
@@ -631,8 +665,7 @@ Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node)
 
 int createContentOfTreeNode(FILE* file_ptr, Node* new_node)
 {
-  int returned_separator = ignoreWhitespaces(file_ptr); 
-printf("AFTER PERMISSION TOKEN = '%c'\n", returned_separator);
+  int returned_separator = ignoreWhitespacesInFile(file_ptr); 
 
   if(strcmp(new_node->type_, TYPE_FILE) == 0)
   {
@@ -641,20 +674,13 @@ printf("AFTER PERMISSION TOKEN = '%c'\n", returned_separator);
   }
   else if(strcmp(new_node->type_, TYPE_DIRECTORY) == 0)
   {
-    printf("returned_separator = %d\n", returned_separator);
-printf("OPENING_CONTENT_INDICATOR = %d\n", OPENING_CONTENT_INDICATOR);
     if(returned_separator == OPENING_CONTENT_INDICATOR) 
     {
       int object_return_code = 0; 
 
       while(1)
       {
-        printf("DIR LOOP START\n");
-
-        returned_separator = ignoreWhitespaces(file_ptr); // less than or curved bracked closed or else 
-
-printf("TOKEN = '%c' (%d)\n", returned_separator, returned_separator);
-
+        returned_separator = ignoreWhitespacesInFile(file_ptr); // less than or curved bracked closed or else 
 
         if(returned_separator == CLOSING_CONTENT_INDICATOR)
         {
@@ -662,7 +688,6 @@ printf("TOKEN = '%c' (%d)\n", returned_separator, returned_separator);
         }
         else if(returned_separator == OPENING_INDICATOR)
         {
-          printf("PARSING CHILD\n"); 
           object_return_code = parseObjectFromFile(file_ptr, new_node);
 
           if(object_return_code == EOF)
@@ -713,7 +738,6 @@ void linkNewNode(Node* new_node, Node* parent_node)
 
 int parseObjectFromFile(FILE* file_ptr, Node* parent_node) 
 {
-  printf("D\n");
   Node* new_node = createBasisOfTreeNode(file_ptr, parent_node); 
   if(new_node == NULL)
   {
@@ -736,7 +760,6 @@ int parseObjectFromFile(FILE* file_ptr, Node* parent_node)
 
 Node* parseFile(FILE* file_ptr, Filesystem* filesystem)
 {
-  printf("A\n");
   filesystem->root_node_ = saveRootNode(filesystem);
   if(filesystem->root_node_ == NULL)
   {
@@ -745,9 +768,8 @@ Node* parseFile(FILE* file_ptr, Filesystem* filesystem)
 
   while(1)
   {
-    int return_code = 0; printf("B\n");
-    int returned_separator = ignoreWhitespaces(file_ptr); // more than or else 
-printf("C %d\n", returned_separator);
+    int return_code = 0; 
+    int returned_separator = ignoreWhitespacesInFile(file_ptr); // more than or else 
 
     if(returned_separator == OPENING_INDICATOR)
     {
@@ -777,8 +799,6 @@ printf("C %d\n", returned_separator);
   return filesystem->root_node_; 
 }
 
-
-
 void printFilesystemTree(Node* current_node, int tree_depth)
 {
   if(current_node == NULL)
@@ -802,4 +822,131 @@ void printFilesystemTree(Node* current_node, int tree_depth)
   printFilesystemTree(current_node->directory_child_node_, tree_depth + 1); 
   printFilesystemTree(current_node->next_sibling_node_, tree_depth); 
 }
+
+
+
+/////
+
+
+void printShell(Filesystem* filesystem, Node* current_directory)
+{
+  printPath(filesystem, filesystem->current_working_directory_); 
+  //file 
+  printf("%s", SHELL_OPENING); 
+}
+
+void printPath(Filesystem* filesystem, Node* current_directory)
+{
+  if(current_directory == NULL)
+  {
+    return; 
+  }
+  else if(current_directory->parent_node_ != NULL)
+  {
+    printPath(filesystem, current_directory->parent_node_); 
+  }
+
+  if(current_directory == filesystem->root_node_)
+  {
+    printf("%s", current_directory->name_); 
+    return; 
+  }
+
+  printf("%c%s", PATH_SEPARATOR, current_directory->name_); 
+}
+
+void ignoreWhitespacesInInput(char tmp_input[])
+{
+  int input_index = 0; 
+
+  while(tmp_input[input_index] == WHITESPACE)
+  {
+    char tmp_char = tmp_input[input_index]; 
+    tmp_input[input_index] = tmp_input[input_index + 1];
+    tmp_input[input_index + 1] = tmp_char; 
+  }
+}
+
+int handleInput(Filesystem* filesystem)
+{
+  char tmp_input[BUFFER_SIZE]; 
+  if(fgets(tmp_input, BUFFER_SIZE, stdin) == NULL)
+  {
+    printf("NULL"); 
+    return ERROR; 
+  }
+
+  if(strchr(tmp_input, NEWLINE) == NULL)
+  {
+    int lost_input;
+
+    while((lost_input = getchar()) != NEWLINE && lost_input != EOF)
+    {
+      continue;
+    }
+  }
+
+  if(checkInputForExitCode(tmp_input) == TRUE)
+  {
+    return EXIT; 
+  }
+
+  ignoreWhitespacesInInput(tmp_input); 
+  char* input[MAX_TOKENS]; 
+  input[0] = strtok(tmp_input, " ");
+  if(input[0] == NULL)
+  {
+    return ERROR; 
+  }
+
+  char *tmp_token; 
+
+  for(int token_index = 1; token_index < MAX_TOKENS; token_index++)
+  {
+    tmp_token = strtok(NULL, " ");
+
+    // if(tmp_token == NULL)
+    // {
+    //   break;
+    // }
+
+    input[token_index] = tmp_token; 
+  }
+
+  executeCommandArgument(filesystem, input); 
+  return OKAY; 
+}
+
+int checkInputForExitCode(char tmp_input[])
+{
+  if((strcmp(tmp_input, VALID_EXIT_CODE_1) == 0) ||
+    (strcmp(tmp_input, VALID_EXIT_CODE_2) == 0) ||
+    (strcmp(tmp_input, VALID_EXIT_CODE_3) == 0))
+  {
+    return TRUE;
+  }
+
+  return FALSE; 
+}
+
+void executeCommandArgument(Filesystem* filesystem, char* input[])
+{
+  if((strcmp(input[0], "exit") == 0) ||
+    (strcmp(input[0], "ExIt") == 0) || 
+    (strcmp(input[0], "EXIT") == 0))
+  {
+    printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
+    return; 
+  }
+
+  if(strcmp(input[0], COMMAND_CWD) == 0)
+  {
+    printShell(filesystem, filesystem->current_working_directory_); 
+    return; 
+  }
+
+  printf("%s", ERROR_MESSAGE_COMMAND_UNKNOWN); 
+  return; 
+} 
+
 
