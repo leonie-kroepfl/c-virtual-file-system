@@ -29,7 +29,7 @@
 #define ERROR_MESSAGE_COMMAND_UNKNOWN "[ERROR] Command not found\n"
 #define ERROR_MESSAGE_PERMISSION_READ "[ERROR] No reading permissions for: "
 #define ERROR_MESSAGE_PERMISSION_WRITE "[ERROR] No writing permission for: "
-
+#define ERROR_MESSAGE_EMPTY_FILE "Empty file\n"
 
 
 #define FALSE 0
@@ -128,6 +128,8 @@ int checkInputForExitCode(char tmp_input[]);
 void ignoreWhitespacesInInput(char tmp_input[]); 
 void executeCommandArgument(Filesystem* filesystem, char* input[]); 
 void printPath(Filesystem* filesystem, Node* current_directory); 
+int printContentFromFile(Node* current_directory, char* input[]); 
+void handleCatCommand(Node* current_directory, char* input[]); 
 
 
 //------------------------------------------------------------------------------
@@ -855,6 +857,29 @@ void printPath(Filesystem* filesystem, Node* current_directory)
   printf("%c%s", PATH_SEPARATOR, current_directory->name_); 
 }
 
+int printContentFromFile(Node* current_child, char* input[])
+{
+  if(current_child != NULL)
+  {
+    if(strcmp(current_child->name_, input[1]) != 0)
+    {
+      if(printContentFromFile(current_child->next_sibling_node_, input) == OKAY)
+      {
+        return OKAY;
+      } 
+    }
+
+    if(current_child->file_content_ != NULL)
+    {
+      printf("%s\n", current_child->file_content_); 
+      return OKAY; 
+    }
+    
+    printf("%s", ERROR_MESSAGE_EMPTY_FILE); 
+  }
+  return FALSE; 
+}
+
 void ignoreWhitespacesInInput(char tmp_input[])
 {
   int input_index = 0; 
@@ -944,9 +969,27 @@ void executeCommandArgument(Filesystem* filesystem, char* input[])
     printShell(filesystem, filesystem->current_working_directory_); 
     return; 
   }
+  if(strcmp(input[0], COMMAND_CAT) == 0)
+  {
+    handleCatCommand(filesystem->current_working_directory_, input); 
+    return; 
+  }
 
   printf("%s", ERROR_MESSAGE_COMMAND_UNKNOWN); 
   return; 
 } 
 
+void handleCatCommand(Node* current_directory, char* input[])
+{
+  if(current_directory == NULL)
+  {
+    return; 
+  }
+  else 
+  {
+    handleCatCommand(current_directory->parent_node_, input); 
+  }
+
+    printContentFromFile(current_directory->directory_child_node_, input); 
+}
 
