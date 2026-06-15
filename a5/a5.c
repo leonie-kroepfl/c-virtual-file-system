@@ -655,9 +655,11 @@ Pointer getValidNodeContentForFiles(FILE* file_ptr)
   return tmp_new_ptr; 
 }
 
-
-
-
+//------------------------------------------------------------------------------
+/// @brief This function creates a new node from the file. 
+/// @param file_ptr is the pointer to the open file 
+/// @param parent_node is the parent node from the new child 
+/// @return the string pointer node or NULL if here is an error 
 Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node)
 {
   Node* new_node = saveNewNodeFromFile(file_ptr); 
@@ -671,6 +673,11 @@ Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node)
   return new_node; 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function gets the content for a file object or handels the children for a directory object. 
+/// @param file_ptr is the pointer to the open file 
+/// @param new_node is the new node object created from the file 
+/// @return the correct return code 
 int createContentOfTreeNode(FILE* file_ptr, Node* new_node)
 {
   int returned_separator = ignoreWhitespacesInFile(file_ptr); 
@@ -718,7 +725,10 @@ int createContentOfTreeNode(FILE* file_ptr, Node* new_node)
   return ERROR; 
 }
 
-
+//------------------------------------------------------------------------------
+/// @brief This function links the new node object to its parent. 
+/// @param new_node is the new node object created from the file 
+/// @param parent_node is the parent node from the new child 
 void linkNewNode(Node* new_node, Node* parent_node)
 {
   if(parent_node->directory_child_count_ == 0)
@@ -744,6 +754,11 @@ void linkNewNode(Node* new_node, Node* parent_node)
   return; 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function parses one whole object from the file. 
+/// @param file_ptr is the pointer to the open file 
+/// @param parent_node is the parent node from the new child object 
+/// @return the correct return code 
 int parseObjectFromFile(FILE* file_ptr, Node* parent_node) 
 {
   Node* new_node = createBasisOfTreeNode(file_ptr, parent_node); 
@@ -766,6 +781,11 @@ int parseObjectFromFile(FILE* file_ptr, Node* parent_node)
   return OKAY; 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function handels the parsing into the tree from the file. 
+/// @param file_ptr is the pointer to the open file 
+/// @param filesystem is the pointer to the tree 
+/// @return the root pointer node from the tree or NULL if here is an error 
 Node* parseFile(FILE* file_ptr, Filesystem* filesystem)
 {
   filesystem->root_node_ = saveRootNode(filesystem);
@@ -807,6 +827,10 @@ Node* parseFile(FILE* file_ptr, Filesystem* filesystem)
   return filesystem->root_node_; 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function prints the whole tree system. 
+/// @param current_node is the pointer to the current node position 
+/// @param tree_depth is the depth of the tree from the root 
 void printFilesystemTree(Node* current_node, int tree_depth)
 {
   if(current_node == NULL)
@@ -831,11 +855,13 @@ void printFilesystemTree(Node* current_node, int tree_depth)
   printFilesystemTree(current_node->next_sibling_node_, tree_depth); 
 }
 
+//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
 
-
-/////
-
-
+//------------------------------------------------------------------------------
+/// @brief This function prints the shell path before the input. 
+/// @param filesystem is the pointer to the tree 
+/// @param current_directory is the pointer to the current directory position 
 void printShell(Filesystem* filesystem, Node* current_directory)
 {
   printf("%s", filesystem->root_node_->name_); 
@@ -854,6 +880,10 @@ void printShell(Filesystem* filesystem, Node* current_directory)
   printf("%s", SHELL_OPENING); 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function prints the path within the shell. 
+/// @param filesystem is the pointer to the tree 
+/// @param current_directory is the pointer to the current directory position 
 void printPath(Filesystem* filesystem, Node* current_directory)
 {
   if(current_directory == NULL)
@@ -871,6 +901,11 @@ void printPath(Filesystem* filesystem, Node* current_directory)
   }
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function prints the content from the file in the current directory. 
+/// @param current_child is the pointer to the current child position 
+/// @param input is the inputed file name from the user, which should be printed
+/// @return OKAY or FALSE if there is an error 
 int printContentFromFile(Node* current_child, char* input[])
 {
   if(current_child != NULL)
@@ -894,6 +929,9 @@ int printContentFromFile(Node* current_child, char* input[])
   return FALSE; 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function ignores the useless whitespaces in the input from the user. 
+/// @param tmp_input is the inputed data from the user with any amount of whitespaces
 void ignoreWhitespacesInInput(char tmp_input[])
 {
   int input_index = 0; 
@@ -906,6 +944,10 @@ void ignoreWhitespacesInInput(char tmp_input[])
   }
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function handles the input from the user. 
+/// @param filesystem is the pointer to the tree 
+/// @return OKAY or the correct exit code if there is an error 
 int handleInput(Filesystem* filesystem)
 {
   char tmp_input[BUFFER_SIZE]; 
@@ -950,6 +992,10 @@ int handleInput(Filesystem* filesystem)
   return OKAY; 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function checks the input from the user for exit. 
+/// @param tmp_input is the inputed data from the user
+/// @return TRUE or FALSE if there is no exit inputed from the user 
 int checkInputForExitCode(char tmp_input[])
 {
   if((strcmp(tmp_input, VALID_EXIT_CODE_1) == 0) ||
@@ -962,6 +1008,10 @@ int checkInputForExitCode(char tmp_input[])
   return FALSE; 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function executes the inputed command for the user. 
+/// @param filesystem is the pointer to the tree 
+/// @param input is the inputed data from the user
 void executeCommandArgument(Filesystem* filesystem, char* input[])
 {
   if((strcmp(input[0], "exit") == 0) || (strcmp(input[0], "ExIt") == 0) || 
@@ -971,9 +1021,9 @@ void executeCommandArgument(Filesystem* filesystem, char* input[])
     return; 
   }
 
-  printf("input[0]: %s\n", input[0]); 
-  printf("input[1]: %s\n", input[1]); 
-  printf("input[2]: %s\n", input[2]); 
+  // printf("input[0]: %s\n", input[0]); 
+  // printf("input[1]: %s\n", input[1]); 
+  // printf("input[2]: %s\n", input[2]); 
 
   if(strcmp(input[0], COMMAND_CWD) == 0)
   {
@@ -994,6 +1044,10 @@ void executeCommandArgument(Filesystem* filesystem, char* input[])
   return; 
 } 
 
+//------------------------------------------------------------------------------
+/// @brief This function executes the cat command for the user. 
+/// @param current_directory is the pointer to the current directory position 
+/// @param input is the inputed data from the user
 void handleCatCommand(Node* current_directory, char* input[])
 {
   if((strchr(input[0], NEWLINE) != NULL) || (strchr(input[1], NEWLINE) == NULL))
@@ -1014,6 +1068,10 @@ void handleCatCommand(Node* current_directory, char* input[])
   printContentFromFile(current_directory->directory_child_node_, input); 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function executes the cwd command for the user. 
+/// @param filesystem is the pointer to the tree 
+/// @param input is the inputed data from the user
 void handleCwdCommand(Filesystem* filesystem, char* input[])
 {
   if(strchr(input[0], NEWLINE) == NULL)
@@ -1027,6 +1085,10 @@ void handleCwdCommand(Filesystem* filesystem, char* input[])
   printf("\n"); 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function executes the ls command for the user. 
+/// @param filesystem is the pointer to the tree 
+/// @param input is the inputed data from the user
 void handleLsCommand(Filesystem* filesystem, char* input[])
 {
   if(input[1] != NULL)
@@ -1065,10 +1127,7 @@ void handleLsCommand(Filesystem* filesystem, char* input[])
   if(filesystem->current_working_directory_->permission_ == READ || 
   filesystem->current_working_directory_->permission_ == READ_AND_WRITE)
   {
-    for(int child_count = 0; child_count < filesystem->current_working_directory_->directory_child_count_; child_count++)
-    {
-      printContentFromDirectory(filesystem->current_working_directory_->directory_child_node_, 0);
-    }
+    printContentFromDirectory(filesystem->current_working_directory_->directory_child_node_, 0);
   }
   else 
   {
@@ -1076,7 +1135,14 @@ void handleLsCommand(Filesystem* filesystem, char* input[])
   }
 } 
 
-
+//------------------------------------------------------------------------------
+/// @brief This function changes the path like inputed from the user. 
+/// @param filesystem is the pointer to the tree 
+/// @param current_directory is the pointer to the current directory position 
+/// @param path is the inputed path from the user separated with /
+/// @param path_index is the / index from the inputed path from the user 
+/// @param return_code is the index if a path segment was found or not 
+/// @return OKAY or the correct exit code if there is an error 
 int changePath(Filesystem* filesystem, Node* current_directory, char* path[], int path_index, int return_code)
 {
   if(current_directory == NULL)
@@ -1124,24 +1190,40 @@ int changePath(Filesystem* filesystem, Node* current_directory, char* path[], in
   return 0; 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function prints the children from the current directory. 
+/// @param child_node is the pointer to the current child position 
+/// @param child_index is the index of the child from the current directory 
 void printContentFromDirectory(Node* child_node, int child_index)
 {
   if(child_node != NULL)
   {
-    printf("%s    ", child_node->name_); 
+    printf("%s", child_node->name_); 
+    child_index += 1; 
 
     if(child_node->parent_node_->directory_child_count_ > 4)
     {
       printf("\t"); 
     }
-    else if(child_index == child_node->parent_node_->directory_child_count_ - 1)
+
+    if(child_index == child_node->parent_node_->directory_child_count_)
     {
       printf("\n"); 
     }
+    else if(child_node->parent_node_->directory_child_count_ > 0)
+    {
+      printf("    "); 
+    }
 
-    child_index++; 
-    printContentFromDirectory(child_node->next_sibling_node_, child_index); 
+
+    if(child_index < child_node->parent_node_->directory_child_count_)
+    {
+      printContentFromDirectory(child_node->next_sibling_node_, child_index); 
+    }
   }
 } 
+
+
+
 
 
