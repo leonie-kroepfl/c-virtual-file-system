@@ -26,6 +26,7 @@
 
 #define ERROR_MESSAGE_COMMAND_PARAMETER "[ERROR] Parameters not correct\n"
 #define ERROR_MESSAGE_COMMAND_PATH "[ERROR] Invalid path\n"
+#define ERROR_MESSAGE_COMMAND_NODE "[ERROR] Node not found\n"
 #define ERROR_MESSAGE_COMMAND_UNKNOWN "[ERROR] Command not found\n"
 #define ERROR_MESSAGE_PERMISSION_READ "[ERROR] No reading permissions for: "
 #define ERROR_MESSAGE_PERMISSION_WRITE "[ERROR] No writing permission for: "
@@ -42,6 +43,8 @@
 
 #define BUFFER_SIZE 256 
 #define MAX_TOKENS 3
+#define MAX_COLUMNS 4
+#define COLUMN_SPACES "    "
 #define TYPE_DIRECTORY "DIR"
 #define TYPE_FILE "FILE"
 #define OPENING_INDICATOR '<'
@@ -132,11 +135,17 @@ int printContentFromFile(Node* current_directory, char* input[]);
 void handleCatCommand(Node* current_directory, char* input[]); 
 void handleCwdCommand(Filesystem* filesystem, char* input[]);
 void handleLsCommand(Filesystem* filesystem, char* input[]); 
-void printContentFromDirectory(Node* child_node, int child_index); 
+int getLongestName(Node* parent_node);
+void printContentFromDirectory(Node* child_node, int child_index,int column_width); 
 int changePath(Filesystem* filesystem, Node* current_directory, char* path[], int path_index, int return_code); 
 void handleCdCommand(Filesystem* filesystem, char* input[]); 
 void removeNewline(char* path[]); 
 void separateInput(char* input[], char* path[]); 
+void handleInfoCommand(Node* child_node, char* input[]); 
+void printInformationFromNode(Node* child_node); 
+void handleTreeCommand(Filesystem* filesystem, char* input[]); 
+void handleTouchAndMkdirCommand(Filesystem* filesystem, char* input[], char object_type[]); 
+Node* saveNewNodeFromUser(char* input[], char object_type[], char object_name[]); 
 
 
 
@@ -369,7 +378,7 @@ void freeAllocatedNode(Node* current_node)
 //------------------------------------------------------------------------------
 /// @brief This function saves the new allocated root node with details. 
 /// @param filesystem is pointer to the filesystem 
-/// @return 0 or the individual exit errorcode 
+/// @return the root node pointer or NULL if there is an error 
 Node* saveRootNode(Filesystem* filesystem)
 {
   filesystem->root_node_ = allocateNewNode();
@@ -403,7 +412,6 @@ Node* saveRootNode(Filesystem* filesystem)
 //------------------------------------------------------------------------------
 /// @brief This function saves a new valid node from the file. 
 /// @param file_ptr is the pointer to the open file 
-
 /// @return the node pointer or NULL if here is an error 
 Node* saveNewNodeFromFile(FILE* file_ptr)
 {
@@ -843,23 +851,13 @@ void printFilesystemTree(Node* current_node, int tree_depth)
 
   for(int depth_index = 0; depth_index < tree_depth; depth_index++)
   {
-    printf("\t"); 
+    printf("    "); 
   }
 
   printf("|-- %s\n", current_node->name_);
-    printf("|-- %s\n", current_node->type_);
-    printf("|-- %d\n", current_node->permission_);
-    printf("|-- %s\n", current_node->file_content_);
-    printf("|-- %p\n", current_node->directory_child_node_); 
-    printf("|-- %p\n", current_node->next_sibling_node_);
-    printf("|-- %p\n", current_node->parent_node_);
-
   printFilesystemTree(current_node->directory_child_node_, tree_depth + 1); 
   printFilesystemTree(current_node->next_sibling_node_, tree_depth); 
 }
-
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
 /// @brief This function prints the shell path before the input. 
@@ -1044,6 +1042,22 @@ void executeCommandArgument(Filesystem* filesystem, char* input[])
   {
     handleCdCommand(filesystem, input);
   }
+  else if(strstr(input[0], COMMAND_INFO) != NULL)
+  {
+    handleInfoCommand(filesystem->current_working_directory_->directory_child_node_, input);
+  }
+  else if(strstr(input[0], COMMAND_TREE) != NULL)
+  {
+    handleTreeCommand(filesystem, input);
+  }
+  else if(strstr(input[0], COMMAND_TOUCH) != NULL)
+  {
+    handleTouchAndMkdirCommand(filesystem, input, "FILE\0");
+  }
+  else if(strstr(input[0], COMMAND_MKDIR) != NULL)
+  {
+    handleTouchAndMkdirCommand(filesystem, input, "DIR\0");
+  }
   else 
   {
     printf("%s", ERROR_MESSAGE_COMMAND_UNKNOWN); 
@@ -1127,7 +1141,8 @@ void handleLsCommand(Filesystem* filesystem, char* input[])
   if(filesystem->current_working_directory_->permission_ == READ || 
   filesystem->current_working_directory_->permission_ == READ_AND_WRITE)
   {
-    printContentFromDirectory(filesystem->current_working_directory_->directory_child_node_, 0);
+    int column_width = getLongestName(filesystem->current_working_directory_); 
+    printContentFromDirectory(filesystem->current_working_directory_->directory_child_node_, 0, column_width);
   }
   else 
   {
@@ -1193,6 +1208,12 @@ int changePath(Filesystem* filesystem, Node* current_directory, char* path[], in
     return 0; 
   }
 
+  if(current_directory->permission_ != READ && current_directory->permission_ != READ_AND_WRITE) 
+  {
+    printf("%s", ERROR_MESSAGE_PERMISSION_READ); 
+    return ERROR; 
+  }
+
   for(int tmp_path_index = path_index; tmp_path_index < MAX_TOKENS; tmp_path_index++)
   {
     if(strcmp(path[path_index], ".") == 0)
@@ -1229,6 +1250,12 @@ int changePath(Filesystem* filesystem, Node* current_directory, char* path[], in
       }
     }
 
+    if((path[path_index + 1] == NULL) || (path_index == (MAX_TOKENS - 1)))
+    {
+      printf("%s", ERROR_MESSAGE_COMMAND_PATH); 
+      return ERROR; 
+    }
+
     return_code = 
     changePath(filesystem, current_directory->next_sibling_node_, path, path_index, return_code); 
     if(return_code == ERROR) 
@@ -1251,34 +1278,64 @@ int changePath(Filesystem* filesystem, Node* current_directory, char* path[], in
 /// @brief This function prints the children from the current directory. 
 /// @param child_node is the pointer to the current child position 
 /// @param child_index is the index of the child from the current directory 
-void printContentFromDirectory(Node* child_node, int child_index)
+void printContentFromDirectory(Node* child_node, int child_index, int column_width)
 {
   if(child_node != NULL)
-  {
+  {  
+    int child_count = child_node->parent_node_->directory_child_count_; 
+    int newline_count = (child_count / MAX_COLUMNS) + 1; 
+
     printf("%s", child_node->name_); 
     child_index += 1; 
 
-    if(child_node->parent_node_->directory_child_count_ > 4)
+    if(child_node->parent_node_->directory_child_count_ > 0 && child_index < child_count)
     {
-      printf("\t"); 
+      // printf("%s", COLUMN_SPACES); 
+      column_width += MAX_COLUMNS; 
+      int amount_of_spaces = column_width - (int)strlen(child_node->name_); 
+
+      for(int space_index = 0; space_index < amount_of_spaces; space_index++)
+      {
+        printf(" "); 
+      }
     }
 
-    if(child_index == child_node->parent_node_->directory_child_count_)
+    if(child_index == child_count || child_index == MAX_COLUMNS || child_index == MAX_COLUMNS * newline_count)
     {
       printf("\n"); 
     }
-    else if(child_node->parent_node_->directory_child_count_ > 0)
-    {
-      printf("    "); 
-    }
 
-
-    if(child_index < child_node->parent_node_->directory_child_count_)
+    if(child_index < child_count)
     {
-      printContentFromDirectory(child_node->next_sibling_node_, child_index); 
+      printContentFromDirectory(child_node->next_sibling_node_, child_index, column_width); 
     }
   }
+  return; 
 } 
+
+//------------------------------------------------------------------------------
+/// @brief This function gets the number of the longest name in the current directory. 
+/// @param child_node is the pointer to the current child position 
+/// @return the maximum length 
+int getLongestName(Node* parent_node)
+{
+  Node* child_node = parent_node->directory_child_node_; 
+  int child_count = parent_node->directory_child_count_; 
+  int length_of_objects[child_count]; 
+  int max_length = 0; 
+
+  for(int child_index = 0; child_index < child_count; child_index++)
+  {
+    length_of_objects[child_index] = (int)strlen(child_node->name_);
+    child_node = child_node->next_sibling_node_; 
+
+    if(length_of_objects[child_index] > max_length)
+    {
+      max_length = length_of_objects[child_index]; 
+    }
+  }
+  return max_length; 
+}
 
 //------------------------------------------------------------------------------
 /// @brief This function executes the cd command for the user. 
@@ -1319,7 +1376,227 @@ void handleCdCommand(Filesystem* filesystem, char* input[])
   } 
 }
 
+//------------------------------------------------------------------------------
+/// @brief This function executes the info command for the user. 
+/// @param child_node is the pointer to the current child position 
+/// @param input is the inputed data from the user
+void handleInfoCommand(Node* child_node, char* input[])
+{
+  if(input[1] != NULL)
+  {
+    if(input[2] != NULL)
+    {
+      printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
+      return; 
+    }
+
+    Node* current_child_node = child_node; 
+
+    if(strcmp(current_child_node->name_, input[1]) != 0)
+    {
+      for(int child_index = 1; child_index < current_child_node->parent_node_->directory_child_count_; child_index++)
+      {
+        current_child_node = current_child_node->next_sibling_node_; 
+
+        if(current_child_node != NULL)
+        {
+          if(strcmp(current_child_node->name_, input[1]) == 0)
+          {
+            break; 
+          }
+        }
+      }
+
+      if(strcmp(current_child_node->name_, input[1]) != 0)
+      {
+        printf("%s", ERROR_MESSAGE_COMMAND_NODE); 
+        return; 
+      }
+    }
+
+    printInformationFromNode(current_child_node); 
+  }
+  else 
+  {
+    printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
+    return; 
+  }
+}
+
+//------------------------------------------------------------------------------
+/// @brief This function prints the details from the wanted object node. 
+/// @param child_node is the pointer to the current child 
+void printInformationFromNode(Node* child_node)
+{
+  printf("----------------------\n");
+  printf("Name: %s\n", child_node->name_);
+  printf("Permissions: %d\n", child_node->permission_); 
+  printf("Type: "); 
+
+  if(strcmp(child_node->type_, TYPE_FILE) == 0)
+  {
+    printf("File\n"); 
+  }
+  else
+  {
+    printf("Directory\n"); 
+  }
+
+  printf("Size: "); 
+
+  if(child_node->permission_ >= READ && child_node->permission_ <= READ_AND_WRITE)
+  {
+    int size_of_object = 0; 
+
+    if(strcmp(child_node->type_, TYPE_FILE) == 0)
+    {
+      size_of_object = (int)sizeof(child_node->file_content_); 
+    }
+    else 
+    {
+      size_of_object = child_node->directory_child_count_; 
+    }
+
+    printf("%d\n", size_of_object); 
+  }
+  else 
+  {
+    printf("~\n"); 
+  }
+}
+
+//------------------------------------------------------------------------------
+/// @brief This function executes the tree command for the user. 
+/// @param filesystem is the pointer to the tree 
+/// @param input is the inputed data from the user
+void handleTreeCommand(Filesystem* filesystem, char* input[])
+{
+  Node* tmp_current_directory = filesystem->current_working_directory_; 
+
+  if(input[1] != NULL)
+  {
+    if(input[2] != NULL)
+    {
+      printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
+      return; 
+    }
+
+    char* path[MAX_TOKENS]; 
+    separateInput(input, path); 
+
+    if(path[0] != NULL)
+    {
+      if(changePath(filesystem, tmp_current_directory, path, 0, 0) == ERROR)
+      {
+        return; 
+      }
+    }
+  }
+  else
+  {
+    filesystem->current_working_directory_ = filesystem->root_node_; 
+  } 
+
+  printFilesystemTree(filesystem->current_working_directory_, 0); 
+}
 
 
+
+void handleTouchAndMkdirCommand(Filesystem* filesystem, char* input[], char object_type[])
+{
+  Node* tmp_current_directory = filesystem->current_working_directory_; 
+  Node* new_node; 
+  char tmp_new_name[BUFFER_SIZE]; 
+
+  if(input[1] != NULL)
+  {
+    char* path[MAX_TOKENS]; 
+    separateInput(input, path); 
+
+    if(path[0] != NULL)
+    {
+      if(input[2] != NULL)
+      {
+        for(int path_index = 0; path_index < MAX_TOKENS - 1; path_index++)
+        {
+          if(path[path_index + 1] == NULL)
+          {
+            strcpy(tmp_new_name, path[path_index]); 
+            new_node = saveNewNodeFromUser(input, object_type, tmp_new_name); 
+            if(new_node == NULL)
+            {
+              return; 
+            }
+
+            strcpy(path[path_index], filesystem->current_working_directory_->name_); 
+          }
+        }
+
+        if(path[0] != NULL)
+        {
+          if(changePath(filesystem, tmp_current_directory, path, 0, 0) == ERROR)
+          {
+            printf("%s", ERROR_MESSAGE_COMMAND_PATH); 
+            freeAllocatedNode(new_node); 
+            new_node = NULL; 
+            return; 
+          }
+  
+          new_node->parent_node_ = filesystem->current_working_directory_; 
+          linkNewNode(new_node, filesystem->current_working_directory_); 
+        }
+        
+        if(filesystem->current_working_directory_->permission_ != WRITE && 
+          filesystem->current_working_directory_->permission_ != READ_AND_WRITE)
+        {
+          printf("%s", ERROR_MESSAGE_PERMISSION_WRITE); 
+          return; 
+        }
+      }
+      else 
+      {
+        printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
+        return; 
+      }
+    }
+  }
+}
+
+//------------------------------------------------------------------------------
+/// @brief This function saves a new node with details. 
+/// @param filesystem is pointer to the filesystem 
+/// @param input is the inputed data from the user
+/// @param object_type is the the type from the new node object
+/// @param object_name is the the name from the new node object
+/// @return the node pointer or NULL if there is an error 
+Node* saveNewNodeFromUser(char* input[], char object_type[], char object_name[])
+{
+  Node* new_node = allocateNewNode();
+  if(new_node == NULL)
+  {
+    return NULL; 
+  }
+
+  new_node->type_ = saveNewString(object_type);
+  if(new_node->type_ == NULL)
+  {
+    free(new_node); 
+    return NULL; 
+  }
+
+  new_node->name_ = saveNewString(object_name);
+  if(new_node->name_ == NULL)
+  {
+    free(new_node->type_); 
+    free(new_node); 
+    return NULL; 
+  }
+
+  removeNewline(input); 
+  new_node->permission_ = atoi(input[2]); 
+  new_node->next_sibling_node_ = NULL; 
+  new_node->directory_child_node_ = NULL; 
+  return new_node; 
+}
 
 
