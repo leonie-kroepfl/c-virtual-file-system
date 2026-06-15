@@ -134,6 +134,9 @@ void handleCwdCommand(Filesystem* filesystem, char* input[]);
 void handleLsCommand(Filesystem* filesystem, char* input[]); 
 void printContentFromDirectory(Node* child_node, int child_index); 
 int changePath(Filesystem* filesystem, Node* current_directory, char* path[], int path_index, int return_code); 
+void handleCdCommand(Filesystem* filesystem, char* input[]); 
+void removeNewline(char* path[]); 
+void separateInput(char* input[], char* path[]); 
 
 
 
@@ -1037,6 +1040,10 @@ void executeCommandArgument(Filesystem* filesystem, char* input[])
   {
     handleLsCommand(filesystem, input);
   }
+  else if(strstr(input[0], COMMAND_CD) != NULL)
+  {
+    handleCdCommand(filesystem, input);
+  }
   else 
   {
     printf("%s", ERROR_MESSAGE_COMMAND_UNKNOWN); 
@@ -1080,7 +1087,12 @@ void handleCwdCommand(Filesystem* filesystem, char* input[])
     return; 
   }
 
-  printf("%c", PATH_SEPARATOR); 
+  if(filesystem->current_working_directory_ == filesystem->root_node_)
+  {
+    printf("%c\n", PATH_SEPARATOR); 
+    return; 
+  }
+
   printPath(filesystem, filesystem->current_working_directory_); 
   printf("\n"); 
 }
@@ -1100,26 +1112,14 @@ void handleLsCommand(Filesystem* filesystem, char* input[])
     }
 
     char* path[MAX_TOKENS]; 
+    separateInput(input, path); 
 
-    if(input[1] != NULL)
+    if(path[0] != NULL)
     {
-      path[0] = strtok(input[1], "/");
-      char *tmp_token; 
-
-      for(int token_index = 1; token_index < MAX_TOKENS; token_index++)
+      Node* tmp_current_directory = filesystem->current_working_directory_->directory_child_node_; 
+      if(changePath(filesystem, tmp_current_directory, path, 0, 0) == ERROR)
       {
-        path[token_index] = NULL; 
-        tmp_token = strtok(NULL, "/");
-        path[token_index] = tmp_token; 
-      }
-
-      if(path[0] != NULL)
-      {
-        Node* tmp_current_directory = filesystem->current_working_directory_; 
-        if(changePath(filesystem, tmp_current_directory, path, 0, 0) == ERROR)
-        {
-          return; 
-        }
+        return; 
       }
     }
   }
@@ -1136,6 +1136,49 @@ void handleLsCommand(Filesystem* filesystem, char* input[])
 } 
 
 //------------------------------------------------------------------------------
+/// @brief This function removes the newline from the inputed path. 
+/// @param path is the inputed path from the user separated with /
+void removeNewline(char* path[])
+{
+  for(int path_index = 0; path_index < MAX_TOKENS; path_index++)
+  {
+    if(path[path_index] != NULL)
+    {
+      char* newline_ptr = strchr(path[path_index], NEWLINE);
+
+      if(newline_ptr != NULL)
+      {
+        int newline_position = newline_ptr - path[path_index]; 
+        path[path_index][newline_position] = '\0'; 
+        return; 
+      }
+    }
+  }
+}
+
+//------------------------------------------------------------------------------
+/// @brief This function separates the inputed path. 
+/// @param input is the inputed data from the user
+/// @param path is the inputed path from the user separated with /
+void separateInput(char* input[], char* path[])
+{
+  if(input[1] != NULL)
+  {
+    path[0] = strtok(input[1], "/");
+    char *tmp_token; 
+
+    for(int token_index = 1; token_index < MAX_TOKENS; token_index++)
+    {
+      path[token_index] = NULL; 
+      tmp_token = strtok(NULL, "/");
+      path[token_index] = tmp_token; 
+    }
+
+    removeNewline(path); 
+  }
+}
+
+//------------------------------------------------------------------------------
 /// @brief This function changes the path like inputed from the user. 
 /// @param filesystem is the pointer to the tree 
 /// @param current_directory is the pointer to the current directory position 
@@ -1150,22 +1193,44 @@ int changePath(Filesystem* filesystem, Node* current_directory, char* path[], in
     return 0; 
   }
 
-  if(strcmp(current_directory->name_, path[path_index]) == 0)
+  for(int tmp_path_index = path_index; tmp_path_index < MAX_TOKENS; tmp_path_index++)
   {
-    if((path[path_index + 1] == NULL) || (path_index == (MAX_TOKENS - 1)))
+    if(strcmp(path[path_index], ".") == 0)
     {
-      if(strcmp(current_directory->type_, TYPE_FILE) == 0) 
+      path_index++; 
+    }
+  }
+
+  if(path[path_index] != 0)
+  {
+    if(strcmp(current_directory->name_, path[path_index]) == 0)
+    {
+      if((path[path_index + 1] == NULL) || (path_index == (MAX_TOKENS - 1)))
       {
-        printf("[ERROR] %s is a file, not a directory!\n", current_directory->name_); 
-        return ERROR; 
+        if(strcmp(current_directory->type_, TYPE_FILE) == 0) 
+        {
+          printf("[ERROR] %s is a file, not a directory!\n", current_directory->name_); 
+          return ERROR; 
+        }
+
+        filesystem->current_working_directory_ = current_directory; 
+        return OKAY; 
       }
 
-      filesystem->current_working_directory_ = current_directory; 
-      return OKAY; 
+      return_code = 
+      changePath(filesystem, current_directory->directory_child_node_, path, path_index + 1, return_code); 
+      if(return_code == ERROR) 
+      {
+        return ERROR; 
+      }
+      else if(return_code == OKAY)
+      {
+        return OKAY; 
+      }
     }
 
     return_code = 
-    changePath(filesystem, current_directory->directory_child_node_, path, path_index + 1, return_code); 
+    changePath(filesystem, current_directory->next_sibling_node_, path, path_index, return_code); 
     if(return_code == ERROR) 
     {
       return ERROR; 
@@ -1175,18 +1240,10 @@ int changePath(Filesystem* filesystem, Node* current_directory, char* path[], in
       return OKAY; 
     }
   }
-
-  return_code = 
-  changePath(filesystem, current_directory->next_sibling_node_, path, path_index, return_code); 
-  if(return_code == ERROR) 
+  else 
   {
-    return ERROR; 
+    filesystem->current_working_directory_ = filesystem->root_node_; 
   }
-  else if(return_code == OKAY)
-  {
-    return OKAY; 
-  }
-
   return 0; 
 }
 
@@ -1222,6 +1279,45 @@ void printContentFromDirectory(Node* child_node, int child_index)
     }
   }
 } 
+
+//------------------------------------------------------------------------------
+/// @brief This function executes the cd command for the user. 
+/// @param filesystem is the pointer to the tree 
+/// @param input is the inputed data from the user
+void handleCdCommand(Filesystem* filesystem, char* input[])
+{
+  if(input[1] != NULL)
+  {
+    if(input[2] != NULL)
+    {
+      printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
+      return; 
+    }
+
+    char* path[MAX_TOKENS]; 
+    separateInput(input, path); 
+
+    if(path[0] != NULL)
+    {
+      Node* tmp_current_directory = filesystem->current_working_directory_->directory_child_node_; 
+
+      if(strcmp(path[0], "..") == 0)
+      {
+        filesystem->current_working_directory_ = filesystem->current_working_directory_->parent_node_; 
+        return; 
+      }
+
+      if(changePath(filesystem, tmp_current_directory, path, 0, 0) == ERROR)
+      {
+        return; 
+      }
+    }
+  }
+  else
+  {
+    filesystem->current_working_directory_ = filesystem->root_node_; 
+  } 
+}
 
 
 
