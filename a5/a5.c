@@ -53,7 +53,7 @@
 #define SHELL_OPENING " > "
 #define PATH_SEPARATOR '/'
 
-#define COMMAND_CWD "cwd"
+#define COMMAND_CWD "cwd\n"
 #define COMMAND_LS "ls"
 #define COMMAND_CD "cd"
 #define COMMAND_INFO "info"
@@ -130,6 +130,12 @@ void executeCommandArgument(Filesystem* filesystem, char* input[]);
 void printPath(Filesystem* filesystem, Node* current_directory); 
 int printContentFromFile(Node* current_directory, char* input[]); 
 void handleCatCommand(Node* current_directory, char* input[]); 
+void handleCwdCommand(Filesystem* filesystem, char* input[]);
+void handleLsCommand(Filesystem* filesystem, char* input[]); 
+void printContentFromDirectory(Node* child_node, int child_index); 
+int changePath(Filesystem* filesystem, Node* current_directory, char* path[], int path_index, int return_code); 
+
+
 
 
 //------------------------------------------------------------------------------
@@ -384,7 +390,7 @@ Node* saveRootNode(Filesystem* filesystem)
     return NULL; 
   }
 
-  filesystem->root_node_->permission_ = NONE; 
+  filesystem->root_node_->permission_ = READ_AND_WRITE; 
   filesystem->root_node_->parent_node_ = NULL; 
   filesystem->root_node_->next_sibling_node_ = NULL; 
   filesystem->root_node_->directory_child_node_ = NULL; 
@@ -554,7 +560,7 @@ int checkValidationOfName(char tmp_character)
   {
     return TRUE;
   }
-  else if(tmp_character == '.')
+  else if(tmp_character == '.' || tmp_character == ' ')
   {
     return TRUE; 
   }
@@ -832,8 +838,19 @@ void printFilesystemTree(Node* current_node, int tree_depth)
 
 void printShell(Filesystem* filesystem, Node* current_directory)
 {
-  printPath(filesystem, filesystem->current_working_directory_); 
-  //file 
+  printf("%s", filesystem->root_node_->name_); 
+  
+  if(current_directory->parent_node_ == filesystem->root_node_)
+  {
+    printPath(filesystem, filesystem->current_working_directory_); 
+  } 
+  else if(current_directory == filesystem->root_node_)
+  {}
+  else 
+  {
+    printf("%c..", PATH_SEPARATOR); 
+    printf("%s%c", current_directory->name_, PATH_SEPARATOR); 
+  }
   printf("%s", SHELL_OPENING); 
 }
 
@@ -848,13 +865,10 @@ void printPath(Filesystem* filesystem, Node* current_directory)
     printPath(filesystem, current_directory->parent_node_); 
   }
 
-  if(current_directory == filesystem->root_node_)
+  if(current_directory != filesystem->root_node_)
   {
-    printf("%s", current_directory->name_); 
-    return; 
+    printf("%c%s", PATH_SEPARATOR, current_directory->name_); 
   }
-
-  printf("%c%s", PATH_SEPARATOR, current_directory->name_); 
 }
 
 int printContentFromFile(Node* current_child, char* input[])
@@ -929,12 +943,6 @@ int handleInput(Filesystem* filesystem)
   for(int token_index = 1; token_index < MAX_TOKENS; token_index++)
   {
     tmp_token = strtok(NULL, " ");
-
-    // if(tmp_token == NULL)
-    // {
-    //   break;
-    // }
-
     input[token_index] = tmp_token; 
   }
 
@@ -956,31 +964,44 @@ int checkInputForExitCode(char tmp_input[])
 
 void executeCommandArgument(Filesystem* filesystem, char* input[])
 {
-  if((strcmp(input[0], "exit") == 0) ||
-    (strcmp(input[0], "ExIt") == 0) || 
+  if((strcmp(input[0], "exit") == 0) || (strcmp(input[0], "ExIt") == 0) || 
     (strcmp(input[0], "EXIT") == 0))
   {
     printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
     return; 
   }
 
+  printf("input[0]: %s\n", input[0]); 
+  printf("input[1]: %s\n", input[1]); 
+  printf("input[2]: %s\n", input[2]); 
+
   if(strcmp(input[0], COMMAND_CWD) == 0)
   {
-    printShell(filesystem, filesystem->current_working_directory_); 
-    return; 
+    handleCwdCommand(filesystem, input); 
   }
-  if(strcmp(input[0], COMMAND_CAT) == 0)
+  else if(strstr(input[0], COMMAND_CAT) != NULL)
   {
     handleCatCommand(filesystem->current_working_directory_, input); 
-    return; 
   }
-
-  printf("%s", ERROR_MESSAGE_COMMAND_UNKNOWN); 
+  else if(strstr(input[0], COMMAND_LS) != NULL)
+  {
+    handleLsCommand(filesystem, input);
+  }
+  else 
+  {
+    printf("%s", ERROR_MESSAGE_COMMAND_UNKNOWN); 
+  }
   return; 
 } 
 
 void handleCatCommand(Node* current_directory, char* input[])
 {
+  if((strchr(input[0], NEWLINE) != NULL) || (strchr(input[1], NEWLINE) == NULL))
+  {
+    printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
+    return; 
+  }
+
   if(current_directory == NULL)
   {
     return; 
@@ -990,6 +1011,137 @@ void handleCatCommand(Node* current_directory, char* input[])
     handleCatCommand(current_directory->parent_node_, input); 
   }
 
-    printContentFromFile(current_directory->directory_child_node_, input); 
+  printContentFromFile(current_directory->directory_child_node_, input); 
 }
+
+void handleCwdCommand(Filesystem* filesystem, char* input[])
+{
+  if(strchr(input[0], NEWLINE) == NULL)
+  {
+    printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
+    return; 
+  }
+
+  printf("%c", PATH_SEPARATOR); 
+  printPath(filesystem, filesystem->current_working_directory_); 
+  printf("\n"); 
+}
+
+void handleLsCommand(Filesystem* filesystem, char* input[])
+{
+  if(input[1] != NULL)
+  {
+    if(input[2] != NULL)
+    {
+      printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
+      return; 
+    }
+
+    char* path[MAX_TOKENS]; 
+
+    if(input[1] != NULL)
+    {
+      path[0] = strtok(input[1], "/");
+      char *tmp_token; 
+
+      for(int token_index = 1; token_index < MAX_TOKENS; token_index++)
+      {
+        path[token_index] = NULL; 
+        tmp_token = strtok(NULL, "/");
+        path[token_index] = tmp_token; 
+      }
+
+      if(path[0] != NULL)
+      {
+        Node* tmp_current_directory = filesystem->current_working_directory_; 
+        if(changePath(filesystem, tmp_current_directory, path, 0, 0) == ERROR)
+        {
+          return; 
+        }
+      }
+    }
+  }
+
+  if(filesystem->current_working_directory_->permission_ == READ || 
+  filesystem->current_working_directory_->permission_ == READ_AND_WRITE)
+  {
+    for(int child_count = 0; child_count < filesystem->current_working_directory_->directory_child_count_; child_count++)
+    {
+      printContentFromDirectory(filesystem->current_working_directory_->directory_child_node_, 0);
+    }
+  }
+  else 
+  {
+    printf("%s%s\n", ERROR_MESSAGE_PERMISSION_READ, filesystem->current_working_directory_->name_); 
+  }
+} 
+
+
+int changePath(Filesystem* filesystem, Node* current_directory, char* path[], int path_index, int return_code)
+{
+  if(current_directory == NULL)
+  {
+    return 0; 
+  }
+
+  if(strcmp(current_directory->name_, path[path_index]) == 0)
+  {
+    if((path[path_index + 1] == NULL) || (path_index == (MAX_TOKENS - 1)))
+    {
+      if(strcmp(current_directory->type_, TYPE_FILE) == 0) 
+      {
+        printf("[ERROR] %s is a file, not a directory!\n", current_directory->name_); 
+        return ERROR; 
+      }
+
+      filesystem->current_working_directory_ = current_directory; 
+      return OKAY; 
+    }
+
+    return_code = 
+    changePath(filesystem, current_directory->directory_child_node_, path, path_index + 1, return_code); 
+    if(return_code == ERROR) 
+    {
+      return ERROR; 
+    }
+    else if(return_code == OKAY)
+    {
+      return OKAY; 
+    }
+  }
+
+  return_code = 
+  changePath(filesystem, current_directory->next_sibling_node_, path, path_index, return_code); 
+  if(return_code == ERROR) 
+  {
+    return ERROR; 
+  }
+  else if(return_code == OKAY)
+  {
+    return OKAY; 
+  }
+
+  return 0; 
+}
+
+void printContentFromDirectory(Node* child_node, int child_index)
+{
+  if(child_node != NULL)
+  {
+    printf("%s    ", child_node->name_); 
+
+    if(child_node->parent_node_->directory_child_count_ > 4)
+    {
+      printf("\t"); 
+    }
+    else if(child_index == child_node->parent_node_->directory_child_count_ - 1)
+    {
+      printf("\n"); 
+    }
+
+    child_index++; 
+    printContentFromDirectory(child_node->next_sibling_node_, child_index); 
+  }
+} 
+
 
