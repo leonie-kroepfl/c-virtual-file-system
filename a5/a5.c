@@ -91,6 +91,7 @@ typedef struct _Node_
   Node* directory_child_node_; 
   int directory_child_count_; 
   Pointer file_content_; 
+  int file_content_size; 
 } Node; 
 
 typedef struct _Filesystem_
@@ -135,7 +136,7 @@ int printContentFromFile(Node* current_directory, char* input[]);
 void handleCatCommand(Node* current_directory, char* input[]); 
 void handleCwdCommand(Filesystem* filesystem, char* input[]);
 void handleLsCommand(Filesystem* filesystem, char* input[]); 
-int getLongestName(Node* parent_node);
+int getColumnWidth(Node* parent_node);
 void printContentFromDirectory(Node* child_node, int child_index,int column_width); 
 int changePath(Filesystem* filesystem, Node* current_directory, char* path[], int path_index, int return_code); 
 void handleCdCommand(Filesystem* filesystem, char* input[]); 
@@ -146,6 +147,7 @@ void printInformationFromNode(Node* child_node);
 void handleTreeCommand(Filesystem* filesystem, char* input[]); 
 void handleTouchAndMkdirCommand(Filesystem* filesystem, char* input[], char object_type[]); 
 Node* saveNewNodeFromUser(char* input[], char object_type[], char object_name[]); 
+int getSizeFromFileContent(Node* file_node); 
 
 
 
@@ -447,6 +449,7 @@ Node* saveNewNodeFromFile(FILE* file_ptr)
 
   new_node->parent_node_ = NULL; 
   new_node->directory_child_count_ = 0; 
+  new_node->file_content_size = 0; 
   new_node->next_sibling_node_ = NULL;
   new_node->directory_child_node_ = NULL;
   return new_node; 
@@ -685,6 +688,22 @@ Node* createBasisOfTreeNode(FILE* file_ptr, Node* parent_node)
 }
 
 //------------------------------------------------------------------------------
+/// @brief This function gets the size of the file content. 
+/// @param file_node is the new file node 
+/// @return the size of the file content 
+int getSizeFromFileContent(Node* file_node)
+{
+  int content_index = 0; 
+
+  while(file_node->file_content_[content_index] != '\0')
+  {
+    content_index++; 
+  }
+
+  return content_index; 
+}
+
+//------------------------------------------------------------------------------
 /// @brief This function gets the content for a file object or handels the children for a directory object. 
 /// @param file_ptr is the pointer to the open file 
 /// @param new_node is the new node object created from the file 
@@ -696,6 +715,7 @@ int createContentOfTreeNode(FILE* file_ptr, Node* new_node)
   if(strcmp(new_node->type_, TYPE_FILE) == 0)
   {
     new_node->file_content_ = getValidNodeContentForFiles(file_ptr); 
+    new_node->file_content_size = getSizeFromFileContent(new_node); 
     return NO_CHILDREN; 
   }
   else if(strcmp(new_node->type_, TYPE_DIRECTORY) == 0)
@@ -867,17 +887,22 @@ void printShell(Filesystem* filesystem, Node* current_directory)
 {
   printf("%s", filesystem->root_node_->name_); 
   
-  if(current_directory->parent_node_ == filesystem->root_node_)
+  if(current_directory != NULL && current_directory->parent_node_ != NULL)
   {
-    printPath(filesystem, filesystem->current_working_directory_); 
-  } 
-  else if(current_directory == filesystem->root_node_)
-  {}
-  else 
-  {
-    printf("%c..", PATH_SEPARATOR); 
-    printf("%s%c", current_directory->name_, PATH_SEPARATOR); 
+    if(current_directory != filesystem->root_node_)
+    {
+      if(current_directory->parent_node_ == filesystem->root_node_)
+      {
+        printPath(filesystem, filesystem->current_working_directory_); 
+      } 
+      else 
+      {
+        printf("%c..", PATH_SEPARATOR); 
+        printf("%s%c", current_directory->name_, PATH_SEPARATOR); 
+      }
+    }
   }
+
   printf("%s", SHELL_OPENING); 
 }
 
@@ -1141,12 +1166,17 @@ void handleLsCommand(Filesystem* filesystem, char* input[])
   if(filesystem->current_working_directory_->permission_ == READ || 
   filesystem->current_working_directory_->permission_ == READ_AND_WRITE)
   {
-    int column_width = getLongestName(filesystem->current_working_directory_); 
+    int column_width = getColumnWidth(filesystem->current_working_directory_); 
     printContentFromDirectory(filesystem->current_working_directory_->directory_child_node_, 0, column_width);
   }
   else 
   {
-    printf("%s%s\n", ERROR_MESSAGE_PERMISSION_READ, filesystem->current_working_directory_->name_); 
+    printf("%s'%s'\n", ERROR_MESSAGE_PERMISSION_READ, filesystem->current_working_directory_->name_); 
+    
+    if(filesystem->current_working_directory_->parent_node_ != NULL)
+    {
+      filesystem->current_working_directory_ = filesystem->current_working_directory_->parent_node_; 
+    }
   }
 } 
 
@@ -1203,26 +1233,39 @@ void separateInput(char* input[], char* path[])
 /// @return OKAY or the correct exit code if there is an error 
 int changePath(Filesystem* filesystem, Node* current_directory, char* path[], int path_index, int return_code)
 {
-  if(current_directory == NULL)
+  if(filesystem->current_working_directory_->permission_ != READ && 
+  filesystem->current_working_directory_->permission_ != READ_AND_WRITE) 
   {
-    return 0; 
-  }
+    printf("%s'%s'\n", ERROR_MESSAGE_PERMISSION_READ, filesystem->current_working_directory_->name_); 
 
-  if(current_directory->permission_ != READ && current_directory->permission_ != READ_AND_WRITE) 
-  {
-    printf("%s", ERROR_MESSAGE_PERMISSION_READ); 
+    if(filesystem->current_working_directory_->parent_node_ != NULL)
+    {
+      filesystem->current_working_directory_ = filesystem->current_working_directory_->parent_node_; 
+    }
     return ERROR; 
   }
 
-  for(int tmp_path_index = path_index; tmp_path_index < MAX_TOKENS; tmp_path_index++)
+  if(strcmp(path[path_index], ".") == 0)
   {
-    if(strcmp(path[path_index], ".") == 0)
-    {
-      path_index++; 
-    }
+    return OKAY; 
+  }
+  else if(strcmp(path[0], "..") == 0)
+  {
+    filesystem->current_working_directory_ = filesystem->current_working_directory_->parent_node_; 
+    path_index++; 
+  }
+  else if(strcmp(path[0], "") == 0)
+  {
+    filesystem->current_working_directory_ = filesystem->root_node_; 
+    path_index++; 
   }
 
-  if(path[path_index] != 0)
+  if(current_directory == NULL)
+  {
+    printf("%s", ERROR_MESSAGE_COMMAND_PATH);
+    return ERROR; 
+  }
+  else if(path[path_index] != 0)
   {
     if(strcmp(current_directory->name_, path[path_index]) == 0)
     {
@@ -1250,12 +1293,6 @@ int changePath(Filesystem* filesystem, Node* current_directory, char* path[], in
       }
     }
 
-    if((path[path_index + 1] == NULL) || (path_index == (MAX_TOKENS - 1)))
-    {
-      printf("%s", ERROR_MESSAGE_COMMAND_PATH); 
-      return ERROR; 
-    }
-
     return_code = 
     changePath(filesystem, current_directory->next_sibling_node_, path, path_index, return_code); 
     if(return_code == ERROR) 
@@ -1266,10 +1303,6 @@ int changePath(Filesystem* filesystem, Node* current_directory, char* path[], in
     {
       return OKAY; 
     }
-  }
-  else 
-  {
-    filesystem->current_working_directory_ = filesystem->root_node_; 
   }
   return 0; 
 }
@@ -1290,7 +1323,6 @@ void printContentFromDirectory(Node* child_node, int child_index, int column_wid
 
     if(child_node->parent_node_->directory_child_count_ > 0 && child_index < child_count)
     {
-      // printf("%s", COLUMN_SPACES); 
       column_width += MAX_COLUMNS; 
       int amount_of_spaces = column_width - (int)strlen(child_node->name_); 
 
@@ -1317,7 +1349,7 @@ void printContentFromDirectory(Node* child_node, int child_index, int column_wid
 /// @brief This function gets the number of the longest name in the current directory. 
 /// @param child_node is the pointer to the current child position 
 /// @return the maximum length 
-int getLongestName(Node* parent_node)
+int getColumnWidth(Node* parent_node)
 {
   Node* child_node = parent_node->directory_child_node_; 
   int child_count = parent_node->directory_child_count_; 
@@ -1358,14 +1390,21 @@ void handleCdCommand(Filesystem* filesystem, char* input[])
     {
       Node* tmp_current_directory = filesystem->current_working_directory_->directory_child_node_; 
 
-      if(strcmp(path[0], "..") == 0)
+      if(changePath(filesystem, tmp_current_directory, path, 0, 0) == ERROR)
       {
-        filesystem->current_working_directory_ = filesystem->current_working_directory_->parent_node_; 
         return; 
       }
 
-      if(changePath(filesystem, tmp_current_directory, path, 0, 0) == ERROR)
+      if(filesystem->current_working_directory_->permission_ != READ && 
+        filesystem->current_working_directory_->permission_ != READ_AND_WRITE)
       {
+        printf("%s", ERROR_MESSAGE_PERMISSION_READ); 
+        printf("'%s'\n", filesystem->current_working_directory_->name_); 
+        
+        if(filesystem->current_working_directory_->parent_node_ != NULL)
+        {
+          filesystem->current_working_directory_ = filesystem->current_working_directory_->parent_node_; 
+        }
         return; 
       }
     }
@@ -1382,7 +1421,7 @@ void handleCdCommand(Filesystem* filesystem, char* input[])
 /// @param input is the inputed data from the user
 void handleInfoCommand(Node* child_node, char* input[])
 {
-  if(input[1] != NULL)
+  if(input[1] != NULL && child_node != NULL)
   {
     if(input[2] != NULL)
     {
@@ -1405,12 +1444,11 @@ void handleInfoCommand(Node* child_node, char* input[])
             break; 
           }
         }
-      }
-
-      if(strcmp(current_child_node->name_, input[1]) != 0)
-      {
-        printf("%s", ERROR_MESSAGE_COMMAND_NODE); 
-        return; 
+        else
+        {
+          printf("%s", ERROR_MESSAGE_COMMAND_NODE); 
+          return; 
+        }
       }
     }
 
@@ -1450,7 +1488,7 @@ void printInformationFromNode(Node* child_node)
 
     if(strcmp(child_node->type_, TYPE_FILE) == 0)
     {
-      size_of_object = (int)sizeof(child_node->file_content_); 
+      size_of_object = child_node->file_content_size; 
     }
     else 
     {
@@ -1497,16 +1535,18 @@ void handleTreeCommand(Filesystem* filesystem, char* input[])
     filesystem->current_working_directory_ = filesystem->root_node_; 
   } 
 
-  printFilesystemTree(filesystem->current_working_directory_, 0); 
+  printFilesystemTree(filesystem->current_working_directory_->directory_child_node_, 0); 
 }
+
+
+
 
 
 
 void handleTouchAndMkdirCommand(Filesystem* filesystem, char* input[], char object_type[])
 {
-  Node* tmp_current_directory = filesystem->current_working_directory_; 
+  Node* current_directory = filesystem->current_working_directory_->directory_child_node_; 
   Node* new_node; 
-  char tmp_new_name[BUFFER_SIZE]; 
 
   if(input[1] != NULL)
   {
@@ -1521,37 +1561,58 @@ void handleTouchAndMkdirCommand(Filesystem* filesystem, char* input[], char obje
         {
           if(path[path_index + 1] == NULL)
           {
-            strcpy(tmp_new_name, path[path_index]); 
-            new_node = saveNewNodeFromUser(input, object_type, tmp_new_name); 
+            new_node = saveNewNodeFromUser(input, object_type, path[path_index]); 
             if(new_node == NULL)
             {
               return; 
             }
 
-            strcpy(path[path_index], filesystem->current_working_directory_->name_); 
+            path[path_index] = 0; 
+            break; 
           }
         }
 
         if(path[0] != NULL)
         {
-          if(changePath(filesystem, tmp_current_directory, path, 0, 0) == ERROR)
+          if(strcmp(path[0], ".") == 0)
           {
-            printf("%s", ERROR_MESSAGE_COMMAND_PATH); 
-            freeAllocatedNode(new_node); 
-            new_node = NULL; 
-            return; 
+            current_directory = filesystem->current_working_directory_; 
           }
-  
-          new_node->parent_node_ = filesystem->current_working_directory_; 
-          linkNewNode(new_node, filesystem->current_working_directory_); 
+          else
+          {
+            if(changePath(filesystem, current_directory, path, 0, 0) == ERROR)
+            {
+              freeAllocatedNode(new_node); 
+              new_node = NULL; 
+              return; 
+            }
+
+            Node* new_path_directory = filesystem->current_working_directory_; 
+            filesystem->current_working_directory_ = current_directory->parent_node_; 
+            current_directory = new_path_directory; 
+          }
+        }
+        else
+        {
+          current_directory = filesystem->current_working_directory_; 
         }
         
-        if(filesystem->current_working_directory_->permission_ != WRITE && 
-          filesystem->current_working_directory_->permission_ != READ_AND_WRITE)
+        if(current_directory->permission_ != WRITE && 
+          current_directory->permission_ != READ_AND_WRITE)
         {
           printf("%s", ERROR_MESSAGE_PERMISSION_WRITE); 
+          printf("'%s'\n", current_directory->name_); 
+
+          if(current_directory->parent_node_ != NULL)
+          {
+            filesystem->current_working_directory_ = current_directory->parent_node_; 
+          }
+
           return; 
         }
+
+        new_node->parent_node_ = current_directory; 
+        linkNewNode(new_node, current_directory); 
       }
       else 
       {
@@ -1596,6 +1657,8 @@ Node* saveNewNodeFromUser(char* input[], char object_type[], char object_name[])
   new_node->permission_ = atoi(input[2]); 
   new_node->next_sibling_node_ = NULL; 
   new_node->directory_child_node_ = NULL; 
+  new_node->directory_child_count_ = 0; 
+  new_node->file_content_size = 0; 
   return new_node; 
 }
 
