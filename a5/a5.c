@@ -132,8 +132,8 @@ int checkInputForExitCode(char tmp_input[]);
 void ignoreWhitespacesInInput(char tmp_input[]); 
 void executeCommandArgument(Filesystem* filesystem, char* input[]); 
 void printPath(Filesystem* filesystem, Node* current_directory); 
-int printContentFromFile(Node* current_directory, char* input[]); 
-void handleCatCommand(Node* current_directory, char* input[]); 
+int printContentFromFile(Node* current_directory, char* file_name); 
+void handleCatCommand(Filesystem* filesystem, Node* current_directory, char* input[]); 
 void handleCwdCommand(Filesystem* filesystem, char* input[]);
 void handleLsCommand(Filesystem* filesystem, char* input[]); 
 int getColumnWidth(Node* parent_node);
@@ -934,13 +934,14 @@ void printPath(Filesystem* filesystem, Node* current_directory)
 /// @param current_child is the pointer to the current child position 
 /// @param input is the inputed file name from the user, which should be printed
 /// @return OKAY or FALSE if there is an error 
-int printContentFromFile(Node* current_child, char* input[])
+int printContentFromFile(Node* current_child, char* file_name)
 {
   if(current_child != NULL)
   {
-    if(strcmp(current_child->name_, input[1]) != 0)
+    if(strcmp(current_child->name_, file_name) != 0)
     {
-      int return_code = printContentFromFile(current_child->next_sibling_node_, input); 
+
+      int return_code = printContentFromFile(current_child->next_sibling_node_, file_name); 
       if(return_code == OKAY)
       {
         return OKAY;
@@ -961,13 +962,6 @@ int printContentFromFile(Node* current_child, char* input[])
       printf("%s", ERROR_MESSAGE_EMPTY_FILE); 
       return ERROR; 
     }
-
-    if(current_child->next_sibling_node_ == NULL)
-    {
-      printf("%s", ERROR_MESSAGE_COMMAND_PATH); 
-      return ERROR; 
-    }
-
   }
 
   return FALSE; 
@@ -1065,17 +1059,13 @@ void executeCommandArgument(Filesystem* filesystem, char* input[])
     return; 
   }
 
-  // printf("input[0]: %s\n", input[0]); 
-  // printf("input[1]: %s\n", input[1]); 
-  // printf("input[2]: %s\n", input[2]); 
-
   if(strcmp(input[0], COMMAND_CWD) == 0)
   {
     handleCwdCommand(filesystem, input); 
   }
   else if(strstr(input[0], COMMAND_CAT) != NULL)
   {
-    handleCatCommand(filesystem->current_working_directory_, input); 
+    handleCatCommand(filesystem, filesystem->current_working_directory_, input); 
   }
   else if(strstr(input[0], COMMAND_LS) != NULL)
   {
@@ -1114,26 +1104,46 @@ void executeCommandArgument(Filesystem* filesystem, char* input[])
 
 //------------------------------------------------------------------------------
 /// @brief This function executes the cat command for the user. 
+/// @param filesystem is the pointer to the tree 
 /// @param current_directory is the pointer to the current directory position 
 /// @param input is the inputed data from the user
-void handleCatCommand(Node* current_directory, char* input[])
+void handleCatCommand(Filesystem* filesystem, Node* current_directory, char* input[])
 {
-  if((strchr(input[0], NEWLINE) != NULL) || (strchr(input[1], NEWLINE) == NULL))
+  Node* tmp_current_directory = filesystem->current_working_directory_; 
+
+  if(input[1] != NULL)
   {
-    printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
-    return; 
+    if(input[2] != NULL)
+    {
+      printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER); 
+      return; 
+    }
+
+    char* path[MAX_TOKENS]; 
+    separateInput(input, path); 
+
+    if(path[0] != NULL)
+    {
+      for(int path_index = 0; path_index < MAX_TOKENS - 1; path_index++)
+      {
+        if(path[path_index + 1] == NULL)
+        {
+          char* file_name = path[path_index]; 
+          path[path_index] = 0; 
+          
+          if(changePath(filesystem, current_directory, path, path_index, 0) == ERROR)
+          {
+            return; 
+          } 
+
+          printContentFromFile(filesystem->current_working_directory_->directory_child_node_, file_name);
+          break; 
+        }
+      }
+    }
   }
 
-  if(current_directory == NULL)
-  {
-    return; 
-  }
-  else 
-  {
-    handleCatCommand(current_directory->parent_node_, input); 
-  }
-
-  printContentFromFile(current_directory->directory_child_node_, input); 
+  filesystem->current_working_directory_ = tmp_current_directory; 
 }
 
 //------------------------------------------------------------------------------
@@ -1267,44 +1277,58 @@ int changePath(Filesystem* filesystem, Node* current_directory, char* path[], in
     return ERROR; 
   }
 
-  if(strcmp(path[path_index], ".") == 0)
+  if(path[path_index] != NULL)
   {
-    return OKAY; 
-  }
-  else if(strcmp(path[0], "..") == 0)
-  {
-    filesystem->current_working_directory_ = filesystem->current_working_directory_->parent_node_; 
-    path_index++; 
-  }
-  else if(strcmp(path[0], "") == 0)
-  {
-    filesystem->current_working_directory_ = filesystem->root_node_; 
-    path_index++; 
-  }
-
-  if(current_directory == NULL)
-  {
-    printf("%s", ERROR_MESSAGE_COMMAND_PATH);
-    return ERROR; 
-  }
-  else if(path[path_index] != 0)
-  {
-    if(strcmp(current_directory->name_, path[path_index]) == 0)
+    if(strcmp(path[path_index], ".") == 0)
     {
-      if((path[path_index + 1] == NULL) || (path_index == (MAX_TOKENS - 1)))
+      return OKAY; 
+    }
+    else if(strcmp(path[0], "..") == 0)
+    {
+      filesystem->current_working_directory_ = filesystem->current_working_directory_->parent_node_; 
+      path_index++; 
+    }
+    else if(strcmp(path[0], "") == 0)
+    {
+      filesystem->current_working_directory_ = filesystem->root_node_; 
+      path_index++; 
+    }
+
+    if(current_directory == NULL)
+    {
+      printf("%s", ERROR_MESSAGE_COMMAND_PATH);
+      return ERROR; 
+    }
+    else if(path[path_index] != 0)
+    {
+      if(strcmp(current_directory->name_, path[path_index]) == 0)
       {
-        if(strcmp(current_directory->type_, TYPE_FILE) == 0) 
+        if((path[path_index + 1] == NULL) || (path_index == (MAX_TOKENS - 1)))
         {
-          printf("[ERROR] %s is a file, not a directory!\n", current_directory->name_); 
-          return ERROR; 
+          if(strcmp(current_directory->type_, TYPE_FILE) == 0) 
+          {
+            printf("[ERROR] %s is a file, not a directory!\n", current_directory->name_); 
+            return ERROR; 
+          }
+
+          filesystem->current_working_directory_ = current_directory; 
+          return OKAY; 
         }
 
-        filesystem->current_working_directory_ = current_directory; 
-        return OKAY; 
+        return_code = 
+        changePath(filesystem, current_directory->directory_child_node_, path, path_index + 1, return_code); 
+        if(return_code == ERROR) 
+        {
+          return ERROR; 
+        }
+        else if(return_code == OKAY)
+        {
+          return OKAY; 
+        }
       }
 
       return_code = 
-      changePath(filesystem, current_directory->directory_child_node_, path, path_index + 1, return_code); 
+      changePath(filesystem, current_directory->next_sibling_node_, path, path_index, return_code); 
       if(return_code == ERROR) 
       {
         return ERROR; 
@@ -1314,18 +1338,13 @@ int changePath(Filesystem* filesystem, Node* current_directory, char* path[], in
         return OKAY; 
       }
     }
-
-    return_code = 
-    changePath(filesystem, current_directory->next_sibling_node_, path, path_index, return_code); 
-    if(return_code == ERROR) 
-    {
-      return ERROR; 
-    }
-    else if(return_code == OKAY)
-    {
-      return OKAY; 
-    }
   }
+  else if(current_directory == NULL)
+  {
+    printf("%s", ERROR_MESSAGE_COMMAND_PATH);
+    return ERROR; 
+  }
+
   return 0; 
 }
 
@@ -1563,11 +1582,11 @@ void handleTreeCommand(Filesystem* filesystem, char* input[])
   printFilesystemTree(filesystem->current_working_directory_->directory_child_node_, 0); 
 }
 
-
-
-
-
-
+//------------------------------------------------------------------------------
+/// @brief This function executes the touch and mkdir command for the user. 
+/// @param filesystem is the pointer to the tree 
+/// @param input is the inputed data from the user
+/// @param object_type is the object type from the new node 
 void handleTouchAndMkdirCommand(Filesystem* filesystem, char* input[], char object_type[])
 {
   Node* current_directory = filesystem->current_working_directory_->directory_child_node_; 
@@ -1607,7 +1626,7 @@ void handleTouchAndMkdirCommand(Filesystem* filesystem, char* input[], char obje
           {
             if(changePath(filesystem, current_directory, path, 0, 0) == ERROR)
             {
-              freeAllocatedNode(new_node); 
+              freeChildNode(new_node); 
               new_node = NULL; 
               return; 
             }
@@ -1650,7 +1669,6 @@ void handleTouchAndMkdirCommand(Filesystem* filesystem, char* input[], char obje
 
 //------------------------------------------------------------------------------
 /// @brief This function saves a new node with details. 
-/// @param filesystem is pointer to the filesystem 
 /// @param input is the inputed data from the user
 /// @param object_type is the the type from the new node object
 /// @param object_name is the the name from the new node object
@@ -1687,7 +1705,10 @@ Node* saveNewNodeFromUser(char* input[], char object_type[], char object_name[])
   return new_node; 
 }
 
-
+//------------------------------------------------------------------------------
+/// @brief This function executes the rm command for the user. 
+/// @param filesystem is the pointer to the tree 
+/// @param input is the inputed data from the user
 void handleRmCommand(Filesystem* filesystem, char* input[])
 {
   if(input[1] != NULL)
@@ -1759,7 +1780,9 @@ void handleRmCommand(Filesystem* filesystem, char* input[])
   }
 }
 
-
+//------------------------------------------------------------------------------
+/// @brief This function frees the target node from the rm command. 
+/// @param target_node is the node which gets freed now 
 void freeChildNode(Node* target_node)
 {
   if(target_node == NULL)
