@@ -148,6 +148,8 @@ void handleTreeCommand(Filesystem* filesystem, char* input[]);
 void handleTouchAndMkdirCommand(Filesystem* filesystem, char* input[], char object_type[]); 
 Node* saveNewNodeFromUser(char* input[], char object_type[], char object_name[]); 
 int getSizeFromFileContent(Node* file_node); 
+void handleRmCommand(Filesystem* filesystem, char* input[]); 
+void freeChildNode(Node* target_node); 
 
 
 
@@ -938,10 +940,15 @@ int printContentFromFile(Node* current_child, char* input[])
   {
     if(strcmp(current_child->name_, input[1]) != 0)
     {
-      if(printContentFromFile(current_child->next_sibling_node_, input) == OKAY)
+      int return_code = printContentFromFile(current_child->next_sibling_node_, input); 
+      if(return_code == OKAY)
       {
         return OKAY;
       } 
+      else if(return_code == ERROR)
+      {
+        return ERROR; 
+      }
     }
 
     if(current_child->file_content_ != NULL)
@@ -949,9 +956,20 @@ int printContentFromFile(Node* current_child, char* input[])
       printf("%s\n", current_child->file_content_); 
       return OKAY; 
     }
-    
-    printf("%s", ERROR_MESSAGE_EMPTY_FILE); 
+    else if(current_child->file_content_ == NULL && current_child->next_sibling_node_ != NULL)
+    {
+      printf("%s", ERROR_MESSAGE_EMPTY_FILE); 
+      return ERROR; 
+    }
+
+    if(current_child->next_sibling_node_ == NULL)
+    {
+      printf("%s", ERROR_MESSAGE_COMMAND_PATH); 
+      return ERROR; 
+    }
+
   }
+
   return FALSE; 
 }
 
@@ -979,7 +997,7 @@ int handleInput(Filesystem* filesystem)
   char tmp_input[BUFFER_SIZE]; 
   if(fgets(tmp_input, BUFFER_SIZE, stdin) == NULL)
   {
-    printf("NULL"); 
+    printf("EMPTY"); 
     return ERROR; 
   }
 
@@ -1082,6 +1100,10 @@ void executeCommandArgument(Filesystem* filesystem, char* input[])
   else if(strstr(input[0], COMMAND_MKDIR) != NULL)
   {
     handleTouchAndMkdirCommand(filesystem, input, "DIR\0");
+  }
+  else if(strstr(input[0], COMMAND_RM) != NULL)
+  {
+    handleRmCommand(filesystem, input);
   }
   else 
   {
@@ -1532,7 +1554,10 @@ void handleTreeCommand(Filesystem* filesystem, char* input[])
   }
   else
   {
-    filesystem->current_working_directory_ = filesystem->root_node_; 
+    if(filesystem->root_node_ != NULL)
+    {
+      filesystem->current_working_directory_ = filesystem->root_node_; 
+    }
   } 
 
   printFilesystemTree(filesystem->current_working_directory_->directory_child_node_, 0); 
@@ -1662,4 +1687,89 @@ Node* saveNewNodeFromUser(char* input[], char object_type[], char object_name[])
   return new_node; 
 }
 
+
+void handleRmCommand(Filesystem* filesystem, char* input[])
+{
+  if(input[1] != NULL)
+  {
+    if(strcmp(input[1], "root\n") == 0)
+    {
+      filesystem->current_working_directory_ = filesystem->current_working_directory_->parent_node_; 
+      freeAllocatedNode(filesystem->root_node_); 
+      filesystem->root_node_ = NULL; 
+      return; 
+    }
+
+    handleCdCommand(filesystem, input);   
+    Node* target_node = filesystem->current_working_directory_; 
+    Node* tmp_parent_directory = filesystem->current_working_directory_->parent_node_; 
+
+    if(target_node != filesystem->root_node_ && target_node->parent_node_ != NULL)
+    {
+      Node* current_child_node = tmp_parent_directory->directory_child_node_; 
+
+      if(tmp_parent_directory->directory_child_count_ == 1)
+      {
+        tmp_parent_directory->directory_child_node_ = NULL; 
+        tmp_parent_directory->directory_child_count_--; 
+        filesystem->current_working_directory_ = tmp_parent_directory; 
+        freeAllocatedNode(target_node); 
+        target_node = NULL; 
+        return; 
+      }
+
+      while(current_child_node != target_node)
+      {
+        if(current_child_node != NULL && current_child_node->next_sibling_node_ != NULL)
+        {
+          if(current_child_node->next_sibling_node_ == target_node)
+          {
+            break;
+          }
+
+          current_child_node = current_child_node->next_sibling_node_; 
+        }
+        else 
+        {
+          break; 
+        }
+      } 
+
+      if(current_child_node->next_sibling_node_ == target_node)
+      {
+        current_child_node->next_sibling_node_ = target_node->next_sibling_node_; 
+        tmp_parent_directory->directory_child_count_--; 
+      }
+      else if(current_child_node == target_node)
+      {
+        tmp_parent_directory->directory_child_node_ = target_node->next_sibling_node_; 
+        tmp_parent_directory->directory_child_count_--; 
+      }
+
+      filesystem->current_working_directory_ = tmp_parent_directory; 
+      freeChildNode(target_node); 
+      target_node = NULL; 
+      return; 
+    }
+  }
+  else 
+  {
+    printf("%s", ERROR_MESSAGE_COMMAND_PARAMETER);
+    return; 
+  }
+}
+
+
+void freeChildNode(Node* target_node)
+{
+  if(target_node == NULL)
+  {
+    return; 
+  }
+
+  freeAllocatedStrings(&target_node); 
+  freeAllocatedNode(target_node->directory_child_node_); 
+  free(target_node); 
+  target_node = NULL; 
+}
 
